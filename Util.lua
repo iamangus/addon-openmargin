@@ -66,13 +66,16 @@ end
 function ns.FormatMoneyFull(copper)
 	copper = tonumber(copper)
 	if not copper then return "?" end
-	if _G.GetMoneyString then
-		local ok, text = pcall(_G.GetMoneyString, copper)
-		if ok and text then return text end
-	end
 
 	local negative = copper < 0
 	local value = abs(floor(copper + 0.5))
+	if _G.GetMoneyString then
+		-- GetMoneyString mishandles negative values on some clients, so format
+		-- the absolute amount and add the sign ourselves.
+		local ok, text = pcall(_G.GetMoneyString, value)
+		if ok and text then return (negative and "-" or "") .. text end
+	end
+
 	local gold = floor(value / 10000)
 	local silver = floor((value % 10000) / 100)
 	local copperPart = value % 100
