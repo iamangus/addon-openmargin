@@ -482,9 +482,16 @@ function ns.UpdateBreakdownPanel(form)
 		setRowValue(panel.rows.sale, econ.recipe and econ.recipe.outputItemID and "no price" or "no item output")
 	end
 
+	local vendorBasis = ns.db.settings.vendorBasis
+	if panel.rows.vendor and panel.rows.vendor.left then
+		panel.rows.vendor.left:SetText(
+			vendorBasis == "full" and "Vendor net (full cost)" or "Vendor net (vendor mats)")
+	end
 	local vendorValue = ns.GetVendorMetric(econ, ns.db.settings)
 	if vendorValue then
 		setRowValue(panel.rows.vendor, ns.FormatMoney(vendorValue, true))
+	elseif vendorBasis == "full" and econ.vendorSale and not econ.costComplete then
+		setRowValue(panel.rows.vendor, "partial")
 	else
 		setRowValue(panel.rows.vendor, "—")
 	end
@@ -542,10 +549,10 @@ function ns.ShowBreakdownTooltip(panel)
 	tooltip:AddDoubleLine("Sale price", econ.sale and ns.FormatMoneyFull(econ.sale) or "no price", 0.8, 0.8, 0.8, 1, 1, 1)
 	tooltip:AddDoubleLine("AH cut", econ.ahCut and ("-" .. ns.FormatMoneyFull(econ.ahCut)) or "—", 0.8, 0.8, 0.8, 1, 0.5, 0.5)
 	tooltip:AddDoubleLine("Net profit", econ.net and ns.FormatMoney(econ.net, true) or "—", 0.8, 0.8, 0.8, econ.net and econ.net > 0 and 0.25 or 1, econ.net and econ.net > 0 and 1 or 0.3, econ.net and econ.net > 0 and 0.25 or 0.3)
-	tooltip:AddDoubleLine("Vendor net", econ.vendorNet and ns.FormatMoney(econ.vendorNet, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	if econ.vendorNetFull then
-		tooltip:AddDoubleLine("Vendor after full cost", ns.FormatMoney(econ.vendorNetFull, true), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
-	end
+	tooltip:AddDoubleLine("Vendor net (vendor mats)", econ.vendorNet and ns.FormatMoney(econ.vendorNet, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+	local fullText = econ.vendorNetFull and ns.FormatMoney(econ.vendorNetFull, true)
+		or (econ.vendorSale and not econ.costComplete and "partial" or "—")
+	tooltip:AddDoubleLine("Vendor after full cost", fullText, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
 	if econ.marginCost then
 		tooltip:AddDoubleLine("Margin (cost basis)", ns.FormatPercent(econ.marginCost, true), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
 	end

@@ -25,9 +25,13 @@ profession window updates automatically when the scan finishes.
 - Line totals and unit prices under each reagent.
 - Breakdown panel with craft cost, sale price, vendor net, and net profit after
   the Auction House cut. Hover it for a per-reagent breakdown.
-- Vendor net uses the scan-free definition: vendor sell value of the output
-  minus the vendor purchase cost of vendor-bought reagents. Non-vendor reagents
-  are treated as free/gathered.
+- **Vendor net (vendor mats)** uses the scan-free flip definition: vendor sell
+  value of the output minus the vendor purchase cost of **vendor-bought
+  reagents only**. Gathered or crafted reagents count as free, so this can be
+  positive even when the full craft cost is higher than the vendor price.
+- **Vendor after full cost** subtracts the full craft cost instead and is the
+  number to compare with the vendor sell price. `/om vendor scanfree|full`
+  selects which one the panel row and recipe tags use.
 - **Vendor-bought reagent costs use real vendor buy prices**, cached per
   character whenever a vendor is open. Blizzard only exposes the price a vendor
   pays you, not the price a vendor charges; visit a vendor once to populate the
