@@ -150,9 +150,10 @@ local function refreshVendorFrame()
 	local secure = ns.vendorSecureButton
 
 	local showSecure = false
+	local activeScan = vendor.scanState == "scanning" or vendor.scanState == "ready"
 	if vendor.pending then
 		showSecure = false
-	elseif not inCombat() and vendor.scanState == "ready" and top and top.kind == "commodity" then
+	elseif not inCombat() and activeScan and top and top.kind == "commodity" then
 		local target = ns.GetNativeBuyTarget()
 		if target and ns.ComputeCommodityDeal(top) and top.quantity > 0 then
 			showSecure = true
@@ -170,23 +171,16 @@ local function refreshVendorFrame()
 		if vendor.pending then
 			normal:SetText("Buying...")
 			normal:Disable()
+		elseif top and activeScan then
+			if top.kind == "item" then
+				normal:SetText(string.format("Open next +%d%%", math.floor((top.margin or 0) * 100 + 0.5)))
+			else
+				normal:SetText(string.format("Buy %d", top.quantity))
+			end
+			normal:Enable()
 		elseif vendor.scanState == "scanning" then
 			normal:SetText("Scanning...")
 			normal:Disable()
-		elseif vendor.scanState == "idle" then
-			normal:SetText("Scan")
-			normal:Enable()
-		elseif vendor.scanState == "ready" then
-			if not top then
-				normal:SetText("Scan")
-				normal:Enable()
-			elseif top.kind == "item" then
-				normal:SetText(string.format("Open next +%d%%", math.floor((top.margin or 0) * 100 + 0.5)))
-				normal:Enable()
-			else
-				normal:SetText(string.format("Buy %d", top.quantity))
-				normal:Enable()
-			end
 		else
 			normal:SetText("Scan")
 			normal:Enable()
@@ -284,6 +278,7 @@ local function resetScan()
 	vendor.currentDeals = {}
 	vendor.candidateIndex = 0
 	vendor.searchItem = nil
+	vendor.scanPaused = false
 	vendor.searchToken = (vendor.searchToken or 0) + 1
 	vendor.scanToken = (vendor.scanToken or 0) + 1
 	vendor.summaryComplete = false
@@ -420,6 +415,10 @@ end
 function ns.RunNextVendorSearch(token)
 	local vendor = ns.vendor
 	if token ~= vendor.scanToken or vendor.scanState ~= "scanning" then return end
+	if vendor.pending or vendor.scanPaused then
+		ns.After(0.4, function() ns.RunNextVendorSearch(token) end)
+		return
+	end
 	if vendor.searchItem then return end
 
 	vendor.candidateIndex = (vendor.candidateIndex or 0) + 1
@@ -478,6 +477,7 @@ end
 local function finishVendorSearch()
 	local vendor = ns.vendor
 	vendor.searchItem = nil
+	if not vendor.pending then ns.RefreshVendorFrame() end
 	local token = vendor.scanToken
 	ns.After(SEARCH_DELAY, function() ns.RunNextVendorSearch(token) end)
 end
@@ -577,6 +577,7 @@ function ns.OpenVendorItem(deal)
 	local api = _G.C_AuctionHouse
 	local ah = _G.AuctionHouseFrame
 	deal.opened = true
+	ns.vendor.scanPaused = true
 	ns.vendor.status = string.format("Open %s: %d x %s buyout in the native Buy tab",
 		deal.name or itemName(deal.itemID), deal.count or 0, ns.FormatMoneyInput(deal.buyout or 0))
 	ns.RefreshVendorFrame()
@@ -599,15 +600,15 @@ end
 
 function ns.OnVendorAction()
 	local vendor = ns.vendor
-	if vendor.scanState == "scanning" then return end
 	if vendor.scanState == "idle" then
 		ns.StartVendorScan()
 		return
 	end
+	if vendor.scanState ~= "scanning" and vendor.scanState ~= "ready" then return end
 
 	local deal = topDeal()
 	if not deal then
-		ns.StartVendorScan()
+		if vendor.scanState == "ready" then ns.StartVendorScan() end
 		return
 	end
 	if deal.kind == "item" then
@@ -844,11 +845,20 @@ local function getLibAHTab()
 	return nil
 end
 
+function ns.ResumeVendorScanIfNeeded()
+	local vendor = ns.vendor
+	if vendor.scanState == "scanning" and vendor.scanPaused then
+		vendor.scanPaused = false
+		ns.RunNextVendorSearch(vendor.scanToken)
+	end
+end
+
 function ns.SelectVendorTab()
 	local ah = _G.AuctionHouseFrame
 	if not ah or not ns.vendorFrame then return false end
 	if ns.vendorTabLib then
 		local ok = pcall(ns.vendorTabLib.SetSelected, ns.vendorTabLib, "OpenMarginVendorFlip")
+		ns.ResumeVendorScanIfNeeded()
 		return ok
 	end
 
@@ -862,6 +872,7 @@ function ns.SelectVendorTab()
 	if ns.buyFrame then ns.buyFrame:Hide() end
 	ns.vendorFrame:Show()
 	ns.RefreshVendorFrame()
+	ns.ResumeVendorScanIfNeeded()
 	return true
 end
 

@@ -77,11 +77,13 @@ whose buyout is below what a vendor pays for the item.
 1. Set a **Spend cap** (blank = no cap). The cap resets on every new scan.
 2. Click **Scan**. OpenMargin reads the Auction House summary, then searches
    each item that could possibly vendor for a profit.
-3. Deals are ranked by **percent profit margin**. The button buys the best one.
-   For a commodity it buys all affordable units below vendor price in one
-   purchase. For a non-commodity auction it opens the item in the native Buy
-   tab; click the listing and **Buyout** there (Blizzard requires that final
-   click).
+3. Deals are ranked by **percent profit margin**. You do not have to wait for
+   the scan to finish: as soon as a deal is found the button is live and buys
+   the best deal found so far. The scan pauses while a purchase or native
+   Buyout is in progress and resumes after. For a commodity it buys all
+   affordable units below vendor price in one purchase. For a non-commodity
+   auction it opens the item in the native Buy tab; click the listing and
+   **Buyout** there (Blizzard requires that final click).
 4. As you spend, deals beyond the remaining cap or money are skipped. Clicking
    the same button continues down the list.
 
