@@ -40,7 +40,11 @@ function ns.GetBuyMoney()
 end
 
 function ns.GetBuyRemaining(rule)
-	local limit = tonumber(rule and rule.budgetLimit) or 0
+	local limit = tonumber(rule and rule.budgetLimit)
+	if not limit or limit <= 0 then
+		-- No explicit budget: the live quote is still capped by GetMoney().
+		return math.huge
+	end
 	local spent = tonumber(rule and rule.spent) or 0
 	local remaining = limit - spent
 	if remaining < 0 then remaining = 0 end
@@ -1411,17 +1415,23 @@ function ns.UpdateBuyRow(row)
 	if not busySelf and not busyOther and valid and remaining > 0 and ns.IsBuyFrameShown() then
 		local key = string.format("%s|%s|%s", tostring(rule.itemID), tostring(quantity), tostring(rule.maxUnit))
 		if not state.plan or state.blindKey ~= key or state.armedPlan ~= state.plan then
-			ns.ArmBlindBuy(rule, {
+			local plan = {
 				itemID = rule.itemID,
 				quantity = quantity,
 				cost = quantity * rule.maxUnit,
 				maxUnit = rule.maxUnit,
-			})
+			}
+			state.phase = "ready"
+			state.plan = plan
+			state.blindKey = key
+			ns.ArmBlindBuy(rule, plan)
 		end
 	end
 
 	if not busySelf and state.phase == "ready" and state.plan then
-		if not (state.messageUntil and GetTime() < state.messageUntil) then
+		if not ns.GetNativeBuyTarget() then
+			state.status = "Native auction Buy button unavailable - open the AH Commodities tab once"
+		elseif not (state.messageUntil and GetTime() < state.messageUntil) then
 			state.status = string.format("Buy %d at <= %s each", state.plan.quantity, ns.FormatMoneyFull(state.plan.maxUnit))
 		end
 	end
@@ -1442,9 +1452,11 @@ function ns.UpdateBuyRow(row)
 			secure:Enable()
 			secure:SetAlpha(1)
 		else
+			-- Keep the button clickable even before a plan is armed. The
+			-- mouse-down handler commits the edit boxes and can arm the buy.
 			secure:SetAttribute("clickbutton", nil)
 			secure:SetText("Buy")
-			secure:Disable()
+			secure:Enable()
 			secure:SetAlpha(0.5)
 		end
 		if ns.IsBuyRowVisible(row) then secure:Show() else secure:Hide() end

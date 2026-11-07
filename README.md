@@ -86,13 +86,15 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 
 1. **New order**, then shift-click an item from your bags or chat to put its
    name in the Item box.
-2. Set **Max each** (for example `13c`), **Budget** (for example `10s`) and
-   **Qty** (how many units to request per purchase; default 20). Accepted money
-   input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
+2. Set **Max each** (for example `13c`), **Budget** (blank = use your available
+   money) and **Qty** (how many units to request per purchase; default 20).
+   Accepted money input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
 3. Click **Buy**. There is no search step: OpenMargin starts a commodity
    purchase for that quantity, takes the Auction House's live quote, and
    confirms only if the quoted unit price is at or below **Max each** and the
-   total fits the remaining budget and your money.
+   total fits the remaining budget and your money. If the row says the native
+   Auction House Buy button is unavailable, open the AH **Commodities** tab once
+   so Blizzard builds it.
 4. Spam **Buy** to keep buying. The button stays armed for the next purchase;
    when a quote is above your limit or stock is unavailable, the purchase is
    cancelled and the row reports why.
