@@ -6,6 +6,47 @@ local function safeHookGlobal(name, fn)
 	return ok
 end
 
+local function call(method, ...)
+	if type(method) ~= "function" then return nil end
+	local ok, value = pcall(method, ...)
+	if ok then return value end
+	return nil
+end
+
+-- Retail and Forever expose the trainer service's spell id through the
+-- tooltip API. The spell id is also the recipe id, which lets us price
+-- recipes the character has not learned yet.
+function ns.GetTrainerServiceSpellID(skillIndex)
+	local api = _G.C_TooltipInfo
+	if not api or type(api.GetTrainerService) ~= "function" then return nil end
+
+	local data = call(api.GetTrainerService, skillIndex)
+	if type(data) ~= "table" then return nil end
+
+	local spellType = _G.Enum and _G.Enum.TooltipDataType and _G.Enum.TooltipDataType.Spell
+	if spellType and data.type and data.type ~= spellType then return nil end
+
+	local id = data.id
+	if _G.issecretvalue and _G.issecretvalue(id) then return nil end
+	id = tonumber(id)
+	if id and id > 0 then return id end
+	return nil
+end
+
+local function findTrainerRecipe(skillIndex, serviceName, professionName)
+	local spellID = ns.GetTrainerServiceSpellID(skillIndex)
+	if spellID and _G.C_TradeSkillUI then
+		local schematic = call(_G.C_TradeSkillUI.GetRecipeSchematic, spellID, false)
+		if schematic then
+			local record = ns.EnsureRecipe(spellID, professionName)
+			if record and record.schemaLoaded then
+				return spellID
+			end
+		end
+	end
+	return ns.FindTrainerRecipe(professionName, serviceName)
+end
+
 local function ensureTrainerTag(button)
 	local tag = button.OpenMarginTag
 	if not tag then
@@ -96,14 +137,14 @@ function ns.OnTrainerServiceButton(button, elementData)
 		end)
 	end
 
-	local recipeID = ns.FindTrainerRecipe(professionName, serviceName)
+	local recipeID = findTrainerRecipe(skillIndex, serviceName, professionName)
 	if not recipeID then
 		hideTrainerInfo(button)
 		button.OpenMarginRecipeID = nil
 		return
 	end
 
-	ns.EnsureRecipe(recipeID)
+	ns.EnsureRecipe(recipeID, professionName)
 	local econ = ns.GetCachedEconomics(recipeID)
 	if not econ then
 		hideTrainerInfo(button)

@@ -104,6 +104,20 @@ end
 function ns.GetAllRecipeIDs()
 	if not _G.C_TradeSkillUI then return {} end
 
+	-- Prefer GetAllRecipeIDs, which includes learned and unlearned recipes and
+	-- ignores the profession window filters. GetFilteredRecipeIDs can silently
+	-- omit unlearned recipes when a filter could not be turned on.
+	local all = call(_G.C_TradeSkillUI.GetAllRecipeIDs)
+	if type(all) == "table" and #all > 0 then
+		local copy = {}
+		for index = 1, #all do
+			if type(all[index]) == "number" then
+				copy[#copy + 1] = all[index]
+			end
+		end
+		return copy
+	end
+
 	local filters = saveFilters()
 	clearFilters()
 	local ids = call(_G.C_TradeSkillUI.GetFilteredRecipeIDs)
@@ -190,7 +204,7 @@ function ns.BuildRecipeRecord(recipeID, recipeInfo, schematic, professionID, pro
 	return record
 end
 
-function ns.EnsureRecipe(recipeID)
+function ns.EnsureRecipe(recipeID, professionName)
 	if not recipeID then return nil end
 	local existing = ns.db and ns.db.recipes and ns.db.recipes[recipeID]
 	if existing and existing.schemaLoaded then
@@ -221,7 +235,7 @@ function ns.EnsureRecipe(recipeID)
 		recipeInfo,
 		schematic,
 		professionInfo and professionInfo.professionID or (existing and existing.professionID),
-		professionInfo and professionInfo.professionName or (existing and existing.professionName)
+		professionName or (professionInfo and professionInfo.professionName) or (existing and existing.professionName)
 	)
 
 	ns.db.recipes[recipeID] = record

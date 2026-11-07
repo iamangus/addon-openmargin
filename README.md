@@ -60,7 +60,9 @@ Each trainer recipe carries a compact line beside its profit tag:
 
 Hover the recipe for the full breakdown, including sale, net profit and the
 training payback. Values are per craft; recipes that produce several items use
-the average output quantity.
+the average output quantity. Trainer rows are priced for recipes you have not
+learned yet as well; if a row is still blank, open that profession's window
+once so its full recipe list is captured.
 
 ## Buy orders
 
