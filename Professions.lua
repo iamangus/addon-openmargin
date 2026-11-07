@@ -209,6 +209,12 @@ function ns.AddFilterMenuItems(rootDescription)
 		ns.db.settings.net = ns.db.settings.net == "vendor" and "ah" or "vendor"
 		ns.OnSettingChanged()
 	end)
+	rootDescription:CreateCheckbox("Tag as percent", function()
+		return ns.db.settings.tag == "margin"
+	end, function()
+		ns.db.settings.tag = ns.db.settings.tag == "margin" and "profit" or "margin"
+		ns.OnSettingChanged()
+	end)
 end
 
 function ns.UpdateRecipeRowTag(button, recipeInfo)
@@ -399,6 +405,30 @@ function ns.CreateBreakdownPanel(form)
 	vendorLabel:SetPoint("LEFT", vendorCheck, "RIGHT", 2, 0)
 	vendorLabel:SetText("Vendor net")
 
+	local tagCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+	tagCheck:SetSize(20, 20)
+	tagCheck:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 190, 6)
+	tagCheck:SetScript("OnClick", function()
+		ns.db.settings.tag = ns.db.settings.tag == "margin" and "profit" or "margin"
+		ns.OnSettingChanged()
+	end)
+	tagCheck:SetScript("OnEnter", function(self)
+		if _G.GameTooltip then
+			_G.GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			_G.GameTooltip:SetText("Tag as percent")
+			_G.GameTooltip:AddLine("Show recipe tags as a percentage instead of total money.", 0.8, 0.8, 0.8, true)
+			_G.GameTooltip:Show()
+		end
+	end)
+	tagCheck:SetScript("OnLeave", function()
+		if _G.GameTooltip then _G.GameTooltip:Hide() end
+	end)
+	panel.tagCheck = tagCheck
+
+	local tagLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	tagLabel:SetPoint("LEFT", tagCheck, "RIGHT", 2, 0)
+	tagLabel:SetText("Tag %")
+
 	panel:SetScript("OnEnter", function() ns.ShowBreakdownTooltip(panel) end)
 	panel:SetScript("OnLeave", function() if _G.GameTooltip then _G.GameTooltip:Hide() end end)
 
@@ -467,6 +497,7 @@ function ns.UpdateBreakdownPanel(form)
 		setRowValue(panel.rows.net, "—")
 		panel.sortCheck:SetChecked(ns.db.settings.sort == true)
 		panel.vendorCheck:SetChecked(ns.db.settings.net == "vendor")
+		if panel.tagCheck then panel.tagCheck:SetChecked(ns.db.settings.tag == "margin") end
 		return
 	end
 
@@ -512,6 +543,7 @@ function ns.UpdateBreakdownPanel(form)
 
 	panel.sortCheck:SetChecked(ns.db.settings.sort == true)
 	panel.vendorCheck:SetChecked(ns.db.settings.net == "vendor")
+	if panel.tagCheck then panel.tagCheck:SetChecked(ns.db.settings.tag == "margin") end
 end
 
 function ns.ShowBreakdownTooltip(panel)

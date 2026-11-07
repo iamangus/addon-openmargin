@@ -24,7 +24,8 @@ profession window updates automatically when the scan finishes.
   menu or `/om sort`.
 - Line totals and unit prices under each reagent.
 - Breakdown panel with craft cost, sale price, vendor net, and net profit after
-  the Auction House cut. Hover it for a per-reagent breakdown.
+  the Auction House cut. Hover it for a per-reagent breakdown. The **Tag %**
+  checkbox switches recipe-row tags between money and percent.
 - **Vendor net (vendor mats)** uses the scan-free flip definition: vendor sell
   value of the output minus the vendor purchase cost of **vendor-bought
   reagents only**. Gathered or crafted reagents count as free, so this can be
