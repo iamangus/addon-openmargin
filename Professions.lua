@@ -150,7 +150,7 @@ function ns.RefreshVisibleRecipeTags()
 			local elementData = button.GetElementData and button:GetElementData()
 			local recipeInfo = elementData and elementData.data and elementData.data.recipeInfo
 			if recipeInfo then
-				ns.UpdateRecipeRowTag(button, recipeInfo, false)
+				ns.UpdateRecipeRowTag(button, recipeInfo)
 			end
 		end
 	end)
@@ -186,7 +186,7 @@ function ns.AddFilterMenuItems(rootDescription)
 	end)
 end
 
-function ns.UpdateRecipeRowTag(button, recipeInfo, resetBaseWidth)
+function ns.UpdateRecipeRowTag(button, recipeInfo)
 	if not button or not recipeInfo or not ns.db then return end
 
 	if _G.Professions and type(_G.Professions.GetHighestLearnedRecipe) == "function" then
@@ -203,7 +203,6 @@ function ns.UpdateRecipeRowTag(button, recipeInfo, resetBaseWidth)
 	end
 
 	local mode = ns.db.settings.tag or "profit"
-	tag:SetWidth(TAG_WIDTHS[mode] or TAG_WIDTHS.profit)
 	tag:ClearAllPoints()
 	if button.LockedIcon and button.LockedIcon:IsShown() then
 		tag:SetPoint("RIGHT", button.LockedIcon, "LEFT", -2, 0)
@@ -221,13 +220,35 @@ function ns.UpdateRecipeRowTag(button, recipeInfo, resetBaseWidth)
 	tag:SetTextColor(r, g, b)
 	tag:Show()
 
+	local tagWidth = 0
+	if type(tag.GetStringWidth) == "function" then
+		local ok, width = pcall(tag.GetStringWidth, tag)
+		if ok and type(width) == "number" and width > 0 then tagWidth = width end
+	end
+	if tagWidth <= 0 then
+		tagWidth = TAG_WIDTHS[mode] or TAG_WIDTHS.profit
+	end
+	tagWidth = math.ceil(tagWidth)
+	tag:SetWidth(math.max(1, tagWidth))
+
 	if button.Label then
-		if resetBaseWidth or not button.OpenMarginBaseLabelWidth then
-			button.OpenMarginBaseLabelWidth = button.Label:GetWidth()
+		-- Start from the row width rather than the label's current width: the
+		-- current width may already have been reduced by a previous tag update.
+		local rowWidth = button.GetWidth and button:GetWidth() or 0
+		if rowWidth and rowWidth > 0 then
+			local rightFramesWidth = 0
+			if button.LockedIcon and button.LockedIcon:IsShown() then
+				rightFramesWidth = button.LockedIcon:GetWidth() or 0
+			end
+			local countWidth = 0
+			if button.Count and button.Count:IsShown() then
+				countWidth = button.Count:GetStringWidth() or 0
+			end
+			local skillWidth = button.SkillUps and button.SkillUps:GetWidth() or 26
+			local available = rowWidth - (rightFramesWidth + countWidth + 10 + skillWidth + tagWidth + 4)
+			button.Label:SetWidth(rowWidth)
+			button.Label:SetWidth(math.max(24, math.min(available, button.Label:GetStringWidth())))
 		end
-		local width = button.OpenMarginBaseLabelWidth or button.Label:GetWidth()
-		width = width - tag:GetWidth() - 4
-		button.Label:SetWidth(math.max(12, width))
 	end
 end
 
@@ -236,7 +257,7 @@ function ns.OnRecipeRowInit(button, node)
 	local elementData = node:GetData()
 	local recipeInfo = elementData and elementData.recipeInfo
 	if not recipeInfo then return end
-	ns.UpdateRecipeRowTag(button, recipeInfo, true)
+	ns.UpdateRecipeRowTag(button, recipeInfo)
 end
 
 local function addPanelRow(panel, key, label, y, emphasized)
@@ -258,7 +279,7 @@ function ns.CreateBreakdownPanel(form)
 		if ns.breakdownPanel:GetParent() ~= form then
 			ns.breakdownPanel:SetParent(form)
 			ns.breakdownPanel:ClearAllPoints()
-			ns.breakdownPanel:SetPoint("BOTTOMRIGHT", form, "BOTTOMRIGHT", -28, 48)
+			ns.breakdownPanel:SetPoint("BOTTOM", form, "BOTTOM", 0, 48)
 		end
 		return ns.breakdownPanel
 	end
@@ -278,7 +299,7 @@ function ns.CreateBreakdownPanel(form)
 	end
 
 	panel:SetSize(340, 151)
-	panel:SetPoint("BOTTOMRIGHT", form, "BOTTOMRIGHT", -28, 48)
+	panel:SetPoint("BOTTOM", form, "BOTTOM", 0, 48)
 	panel:SetFrameStrata("HIGH")
 	panel:EnableMouse(true)
 	if type(panel.SetMouseClickEnabled) == "function" then

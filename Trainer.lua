@@ -19,12 +19,58 @@ local function ensureTrainerTag(button)
 	return tag
 end
 
+-- Material cost, Auction House sale and vendor sale, kept on one compact line
+-- below the recipe name and to the left of the profit tag.
+local function ensureTrainerDetail(button)
+	local detail = button.OpenMarginDetail
+	if not detail then
+		detail = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		detail:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 44, 2)
+		detail:SetWidth(162)
+		detail:SetJustifyH("LEFT")
+		detail:SetWordWrap(false)
+		detail:SetTextColor(0.75, 0.75, 0.75)
+		button.OpenMarginDetail = detail
+	end
+	return detail
+end
+
+local function hideTrainerInfo(button)
+	if button.OpenMarginTag then button.OpenMarginTag:Hide() end
+	if button.OpenMarginDetail then button.OpenMarginDetail:Hide() end
+end
+
+local function detailMoney(value, uncertain)
+	if not value then return "—" end
+	return (uncertain and "~" or "") .. ns.FormatMoney(value)
+end
+
+local function updateTrainerInfo(button, econ)
+	if not econ then
+		hideTrainerInfo(button)
+		return
+	end
+
+	local tag = ensureTrainerTag(button)
+	local text, r, g, b = ns.GetTag(econ)
+	tag:SetText(text)
+	tag:SetTextColor(r, g, b)
+	tag:Show()
+
+	local detail = ensureTrainerDetail(button)
+	local cost = detailMoney(econ.cost, not econ.costComplete)
+	detail:SetFormattedText("Mat %s AH %s Vendor %s",
+		cost,
+		detailMoney(econ.sale),
+		detailMoney(econ.vendorSale))
+	detail:Show()
+end
+
 function ns.OnTrainerServiceButton(button, elementData)
 	if not button or not ns.db then return end
 
-	local tag = button.OpenMarginTag
 	if not ns.db.settings.trainer or not _G.IsTradeskillTrainer or not _G.IsTradeskillTrainer() then
-		if tag then tag:Hide() end
+		hideTrainerInfo(button)
 		button.OpenMarginRecipeID = nil
 		return
 	end
@@ -32,14 +78,14 @@ function ns.OnTrainerServiceButton(button, elementData)
 	elementData = elementData and (elementData.data or elementData)
 	local skillIndex = elementData and elementData.skillIndex
 	if not skillIndex then
-		if tag then tag:Hide() end
+		hideTrainerInfo(button)
 		return
 	end
 
 	local serviceName = _G.GetTrainerServiceInfo and _G.GetTrainerServiceInfo(skillIndex)
 	local professionName = _G.GetTrainerServiceSkillLine and _G.GetTrainerServiceSkillLine(skillIndex)
 	if not serviceName or not professionName then
-		if tag then tag:Hide() end
+		hideTrainerInfo(button)
 		return
 	end
 
@@ -52,7 +98,7 @@ function ns.OnTrainerServiceButton(button, elementData)
 
 	local recipeID = ns.FindTrainerRecipe(professionName, serviceName)
 	if not recipeID then
-		if tag then tag:Hide() end
+		hideTrainerInfo(button)
 		button.OpenMarginRecipeID = nil
 		return
 	end
@@ -60,15 +106,11 @@ function ns.OnTrainerServiceButton(button, elementData)
 	ns.EnsureRecipe(recipeID)
 	local econ = ns.GetCachedEconomics(recipeID)
 	if not econ then
-		if tag then tag:Hide() end
+		hideTrainerInfo(button)
 		return
 	end
 
-	tag = ensureTrainerTag(button)
-	local text, r, g, b = ns.GetTag(econ)
-	tag:SetText(text)
-	tag:SetTextColor(r, g, b)
-	tag:Show()
+	updateTrainerInfo(button, econ)
 
 	local moneyCost = _G.GetTrainerServiceCost and _G.GetTrainerServiceCost(skillIndex)
 	local payback
@@ -94,13 +136,7 @@ function ns.TryTrainerSpellID(button)
 			if button.OpenMarginRecipeID ~= value then
 				button.OpenMarginRecipeID = value
 				local econ = ns.GetCachedEconomics(value)
-				if econ then
-					local tag = ensureTrainerTag(button)
-					local text, r, g, b = ns.GetTag(econ)
-					tag:SetText(text)
-					tag:SetTextColor(r, g, b)
-					tag:Show()
-				end
+				updateTrainerInfo(button, econ)
 			end
 			return
 		end
@@ -121,7 +157,9 @@ function ns.ShowTrainerTooltip(button)
 	tooltip:AddLine(" ")
 	tooltip:AddLine("OpenMargin", 0.2, 1, 0.6)
 	tooltip:AddDoubleLine("Craft cost", econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial", 0.8, 0.8, 0.8, 1, 1, 1)
+	tooltip:AddDoubleLine("AH sell", econ.sale and ns.FormatMoneyFull(econ.sale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
 	tooltip:AddDoubleLine("AH net", econ.net and ns.FormatMoney(econ.net, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+	tooltip:AddDoubleLine("Vendor sell", econ.vendorSale and ns.FormatMoneyFull(econ.vendorSale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
 	tooltip:AddDoubleLine("Vendor net", econ.vendorNet and ns.FormatMoney(econ.vendorNet, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
 
 	if button.OpenMarginTrainingCost then

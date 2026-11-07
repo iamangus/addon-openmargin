@@ -35,8 +35,8 @@ profession window updates automatically when the scan finishes.
   shown as partial.
 - Craftable reagents are priced at their own craft cost when that is cheaper
   than buying them, including cross-profession chains.
-- Profit tags at profession trainers, plus how many crafts repay the training
-  cost.
+- Profit tags at profession trainers, plus material cost, Auction House sale and
+  vendor sale on each trainer row, and how many crafts repay the training cost.
 - Auctionator price and age on item tooltips.
 - **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
   price and a budget, then click once to search and again to buy. The budget is
@@ -47,6 +47,20 @@ profession window updates automatically when the scan finishes.
   non-commodity deals open in the native Buy tab for the final Buyout click.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
+
+## Trainer rows
+
+Each trainer recipe carries a compact line beside its profit tag:
+
+- **Mat** — material cost for one craft at current prices. A leading `~` means
+  at least one reagent has no price yet, so the total is a lower bound.
+- **AH** — what the crafted output sells for on the Auction House before the
+  cut.
+- **Vendor** — what a vendor pays for the output.
+
+Hover the recipe for the full breakdown, including sale, net profit and the
+training payback. Values are per craft; recipes that produce several items use
+the average output quantity.
 
 ## Buy orders
 
