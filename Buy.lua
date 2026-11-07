@@ -252,12 +252,12 @@ function ns.StopBuyLoop(rule)
 	refreshRule(rule)
 end
 
-function ns.ScheduleBuyLoop(rule)
+function ns.ScheduleBuyLoop(rule, delay)
 	local state = ns.GetBuyState(rule)
 	if not state.loop or ns.buyLoopRule ~= rule or ns.buyPending then return end
 	if ns.buyLoopScheduled then return end
 	ns.buyLoopScheduled = true
-	ns.After(0.8, function()
+	ns.After(delay or 0.8, function()
 		ns.buyLoopScheduled = false
 		local current = ns.GetBuyState(rule)
 		if ns.buyLoopRule == rule and current.loop and not ns.buyPending then
@@ -427,6 +427,19 @@ local function buildPlan(rule, force)
 	end
 	ns.ArmBuyRowSecure(rule)
 	refreshRule(rule)
+
+	-- If the loop is running and the player has not taken this plan, refresh
+	-- the search after the plan goes stale instead of leaving the row idle.
+	if state.loop and ns.buyLoopRule == rule then
+		local plan = state.plan
+		local planSeq = state.planSeq
+		ns.After(PLAN_MAX_AGE, function()
+			if ns.buyLoopRule == rule and state.loop and not ns.buyPending
+				and state.phase == "ready" and state.plan == plan and state.planSeq == planSeq then
+				ns.SearchBuyRule(rule)
+			end
+		end)
+	end
 end
 
 function ns.SearchBuyRule(rule, row)
@@ -519,6 +532,7 @@ function ns.SearchBuyRule(rule, row)
 		state.phase = "idle"
 		state.status = "Search failed"
 		refreshRule(rule)
+		ns.ScheduleBuyLoop(rule, 1)
 		return
 	end
 
@@ -526,8 +540,9 @@ function ns.SearchBuyRule(rule, row)
 		if state.phase == "searching" and state.searchSeq == seq then
 			state.phase = "idle"
 			state.plan = nil
-			state.status = "Search timed out - click again"
+			state.status = "Search timed out - retrying"
 			refreshRule(rule)
+			ns.ScheduleBuyLoop(rule)
 		end
 	end)
 end
@@ -928,8 +943,9 @@ function ns.HandleAuctionError(errorCode)
 		if state.phase == "searching" then
 			state.phase = "idle"
 			state.plan = nil
-			state.status = errorCode == 10 and "Auction house is busy - click again" or "Search failed - click again"
+			state.status = errorCode == 10 and "Auction house is busy - backing off" or "Search failed - retrying"
 			refreshRule(rule)
+			ns.ScheduleBuyLoop(rule, errorCode == 10 and 2 or 1)
 		end
 	end
 end
