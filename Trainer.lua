@@ -222,6 +222,11 @@ function ns.UpdateTrainerSummary()
 	local frame = _G.ClassTrainerFrame
 	if not frame or not ns.db then return end
 
+	if not ns.db.settings.trainer or not frame:IsShown() or not _G.IsTradeskillTrainer or not _G.IsTradeskillTrainer() then
+		if frame.OpenMarginSummary then frame.OpenMarginSummary:Hide() end
+		return
+	end
+
 	local summary = frame.OpenMarginSummary
 	if not summary then
 		summary = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -231,11 +236,6 @@ function ns.UpdateTrainerSummary()
 		summary:SetJustifyH("LEFT")
 		summary:SetJustifyV("MIDDLE")
 		frame.OpenMarginSummary = summary
-	end
-
-	if not ns.db.settings.trainer or not frame:IsShown() or not _G.IsTradeskillTrainer or not _G.IsTradeskillTrainer() then
-		summary:Hide()
-		return
 	end
 
 	local total, mapped, profitable, paybackCount = 0, 0, 0, 0
@@ -278,10 +278,27 @@ end
 function ns.RefreshTrainer()
 	local frame = _G.ClassTrainerFrame
 	if not frame then return end
-	if frame:IsShown() and type(_G.ClassTrainerFrame_Update) == "function" then
-		pcall(_G.ClassTrainerFrame_Update, true)
-	end
+
+	-- Never call ClassTrainerFrame_Update ourselves. It touches protected
+	-- trainer controls and can trigger an "action blocked" dialog, especially
+	-- from the pet trainer. Blizzard already drives that function; retag the
+	-- visible buttons instead.
 	ns.UpdateTrainerSummary()
+
+	if not ns.db or not ns.db.settings.trainer then return end
+	if not _G.IsTradeskillTrainer or not _G.IsTradeskillTrainer() then return end
+
+	local scrollBox = frame.ScrollBox
+	if not scrollBox or type(scrollBox.EnumerateFrames) ~= "function" then return end
+	local ok, err = pcall(function()
+		for button in scrollBox:EnumerateFrames() do
+			local elementData = button.GetElementData and button:GetElementData()
+			if elementData then
+				ns.OnTrainerServiceButton(button, elementData)
+			end
+		end
+	end)
+	if not ok then ns.ReportError(err) end
 end
 
 function ns.InstallTrainerHooks()
