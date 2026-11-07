@@ -208,6 +208,7 @@ local events = {
 	"TRAINER_CLOSED",
 	"AUCTION_HOUSE_SHOW",
 	"AUCTION_HOUSE_CLOSED",
+	"AUCTION_ITEM_LIST_UPDATE",
 	"GET_ITEM_INFO_RECEIVED",
 }
 
@@ -265,8 +266,18 @@ function ns.OnEvent(event, ...)
 		if ns.RefreshTrainer then ns.RefreshTrainer() end
 
 	elseif event == "AUCTION_HOUSE_SHOW" or event == "AUCTION_HOUSE_CLOSED" then
+		if event == "AUCTION_HOUSE_SHOW" and ns.RegisterAuctionatorPriceUpdates then
+			ns.RegisterAuctionatorPriceUpdates()
+		end
 		ns.InvalidatePrices()
 		if ns.RefreshAll then ns.RefreshAll() end
+
+	elseif event == "AUCTION_ITEM_LIST_UPDATE" then
+		-- Older Auctionator builds have no price-update callback. A scan also
+		-- fires this event for every page, so use it as a fallback signal.
+		if not ns.dbUpdateRegistered and ns.NoteAuctionatorPricesChanged then
+			ns.NoteAuctionatorPricesChanged()
+		end
 
 	elseif event == "GET_ITEM_INFO_RECEIVED" then
 		if not ns.itemInfoPending and ns.After then

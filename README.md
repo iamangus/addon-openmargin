@@ -14,7 +14,8 @@ internal strings were copied from the reference addon.
 - **Auctionator** installed and enabled
 
 OpenMargin does not scan the Auction House itself. It reads the last price
-Auctionator has stored. Run Auctionator's own scan to refresh prices.
+Auctionator has stored. Run Auctionator's own scan to refresh prices; an open
+profession window updates automatically when the scan finishes.
 
 ## What it does
 

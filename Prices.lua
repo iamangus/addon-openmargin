@@ -2,6 +2,7 @@ local addonName, ns = ...
 
 local API_CALLER = "OpenMargin"
 local CACHE_SECONDS = 30
+local DB_UPDATE_DELAY = 1
 
 ns.priceCache = {}
 ns.priceEpoch = 1
@@ -14,9 +15,51 @@ function ns.InvalidatePrices()
 	if ns.ClearEconCache then ns.ClearEconCache() end
 end
 
+-- Auctionator calls us back whenever it writes new prices, including while a
+-- scan is running. Wait for a quiet second before redrawing so a long scan
+-- does not trigger a full recalculation for every page.
+function ns.NoteAuctionatorPricesChanged()
+	ns.priceUpdateSeq = (ns.priceUpdateSeq or 0) + 1
+	if ns.priceUpdatePending then return end
+	ns.priceUpdatePending = true
+
+	local seq = ns.priceUpdateSeq
+	local function tick()
+		if seq ~= ns.priceUpdateSeq then
+			seq = ns.priceUpdateSeq
+			ns.After(DB_UPDATE_DELAY, tick)
+			return
+		end
+
+		ns.priceUpdatePending = false
+		local ok, err = pcall(function()
+			ns.InvalidatePrices()
+			if ns.RefreshAll then ns.RefreshAll() end
+		end)
+		if not ok then ns.ReportError(err) end
+	end
+
+	ns.After(DB_UPDATE_DELAY, tick)
+end
+
+function ns.RegisterAuctionatorPriceUpdates()
+	if ns.dbUpdateRegistered then return true end
+
+	local api = ns.GetAuctionatorAPI()
+	local register = api and api.RegisterForDBUpdate
+	if type(register) ~= "function" then return false end
+
+	local ok = pcall(register, API_CALLER, ns.NoteAuctionatorPricesChanged)
+	if ok then
+		ns.dbUpdateRegistered = true
+	end
+	return ok
+end
+
 function ns.CheckAuctionator(silent)
 	local api = ns.GetAuctionatorAPI()
 	ns.auctionatorReady = api ~= nil
+	if api then ns.RegisterAuctionatorPriceUpdates() end
 	if not api and not silent and not ns.warnedAuctionator then
 		ns.warnedAuctionator = true
 		ns.Print("Auctionator is not loaded. OpenMargin reads Auctionator prices; install and enable Auctionator.")
