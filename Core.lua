@@ -17,6 +17,7 @@ ns.defaults = {
 	recipes = {},
 	known = {},
 	meta = {},
+	buyOrders = {},
 }
 
 local function applyDefaults(target, source)
@@ -63,6 +64,8 @@ function ns.InitDB()
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
 	if type(ns.db.meta) ~= "table" then ns.db.meta = {} end
+	if type(ns.db.buyOrders) ~= "table" then ns.db.buyOrders = {} end
+	if ns.InitBuyOrders then ns.InitBuyOrders() end
 
 	ns.RebuildRecipeIndex()
 	if ns.SetCharacterKey then ns.SetCharacterKey() end
@@ -139,6 +142,7 @@ function ns.ResetAll()
 	ns.capturedThisSession = {}
 	ns.ensureFailed = {}
 	ns.sortContext = nil
+	if ns.ClearBuyRuntime then ns.ClearBuyRuntime() end
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()
 	if ns.RefreshAll then ns.RefreshAll() end
@@ -166,6 +170,7 @@ function ns.GetStatusLines()
 		"Sort by profit: " .. (ns.db.settings.sort and "on" or "off"),
 		"Recipes stored: " .. tostring(ns.recipeCount or 0),
 		"Known for this character: " .. tostring(ns.GetKnownRecipeCount()),
+		"Buy orders: " .. tostring(ns.db and ns.db.buyOrders and #ns.db.buyOrders or 0),
 		"Price cache: " .. tostring(ns.GetCacheCount()),
 		"Last profession capture: " .. captureText,
 		"Hooks: profession=" .. tostring(ns.profHooks and ns.profHooks.recipeList == true)
@@ -183,6 +188,7 @@ function ns.RefreshAll()
 		if ns.RefreshProfessionList then ns.RefreshProfessionList() end
 		if ns.RefreshBreakdown then ns.RefreshBreakdown() end
 		if ns.RefreshTrainer then ns.RefreshTrainer() end
+		if ns.RefreshBuyFrame then ns.RefreshBuyFrame() end
 		if ns.RefreshOptions then ns.RefreshOptions() end
 	end)
 	if not ok then ns.ReportError(err) end

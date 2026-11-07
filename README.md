@@ -33,8 +33,32 @@ profession window updates automatically when the scan finishes.
 - Profit tags at profession trainers, plus how many crafts repay the training
   cost.
 - Auctionator price and age on item tooltips.
+- **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
+  price and a budget, then click once to search and again to buy. The budget is
+  remaining spend and can be reset per order.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
+
+## Buy orders
+
+Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
+
+1. **New order**, then shift-click an item from your bags or chat to put its
+   name in the Item box.
+2. Set **Max each** (for example `13c`) and **Budget** (for example `10s`).
+   Accepted input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
+3. Click the row button. It changes from **Search** to **Searching...** and
+   then to **Buy N** when results are in.
+4. Click the same button again to buy. Clicks made while searching or buying
+   are ignored, so it is safe to spam the same spot.
+
+The purchase is quantity-based and always takes the cheapest units first. Only
+units at or below **Max each** are included, and the confirmed unit price and
+total are checked again; if the market moved above your limit, the purchase is
+cancelled and the row goes back to Search. **Remaining** is the budget minus
+what this order has spent; **Reset** gives it a fresh budget.
+
+Purchases go to your mailbox, as with a normal Auction House purchase.
 
 ## Why "OpenMargin"?
 
@@ -45,6 +69,11 @@ the open on GitHub.
 ## Limitations
 
 - No built-in Auction House scan and no TSM support in this build.
+- **Buy orders support commodities only** (cloth, ore, herbs, enchanting
+  materials, and similar trade goods). Non-commodity items have to be bought one
+  auction at a time and need a click per auction.
+- Buy orders do not run in the background: the first click searches and the
+  second confirms, and nothing is bought without a click.
 - **Estimated sales per day is not available.** Auctionator's public API
   exposes prices, not auction quantity or sale history. The panel shows `—`
   for that row rather than inventing a number.
@@ -90,6 +119,7 @@ recipes are captured.
 | --- | --- |
 | `/om status` | Show source, recipe counts and settings |
 | `/om options` | Open the settings panel |
+| `/om buy` | Open the Buy Orders tab in the Auction House |
 | `/om sort` | Toggle sort by profit |
 | `/om tag profit\|margin\|both` | Choose the recipe tag |
 | `/om net ah\|vendor` | Choose Auction House or vendor net |

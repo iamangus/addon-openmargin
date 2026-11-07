@@ -21,6 +21,7 @@ local function printHelp()
 		"/om margin sale|cost — margin basis",
 		"/om vendor scanfree|full — vendor net basis",
 		"/om refresh — clear the price cache and redraw",
+		"/om buy — open the Buy Orders tab in the Auction House",
 		"/om recapture — rebuild the open profession's recipe data",
 		"/om selftest — run the built-in calculation checks",
 		"/om reset confirm — wipe all OpenMargin data",
@@ -125,6 +126,9 @@ local function handleCommand(message)
 		ns.InvalidatePrices()
 		ns.RefreshAll()
 		ns.Print("Price cache cleared.")
+
+	elseif command == "buy" then
+		if ns.OpenBuyOrders then ns.OpenBuyOrders() end
 
 	elseif command == "recapture" then
 		if ns.ScheduleCapture then
