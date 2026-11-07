@@ -195,6 +195,7 @@ function ns.GetStatusLines()
 		"Buy debug: " .. ((ns.IsBuyLogEnabled and ns.IsBuyLogEnabled()) and "on" or "off"),
 		"Price cache: " .. tostring(ns.GetCacheCount()),
 		"Last profession capture: " .. captureText,
+		"Profession UI: " .. ((ns.GetSchematicForm and ns.GetSchematicForm()) and "detected" or "not detected"),
 		"Hooks: profession=" .. tostring(ns.profHooks and ns.profHooks.recipeList == true)
 			.. ", trainer=" .. tostring(ns.trainerHooks and ns.trainerHooks.service == true)
 			.. ", tooltip=" .. tostring(ns.tooltipHooked == true),
@@ -278,11 +279,15 @@ function ns.OnEvent(event, ...)
 		if ns.RefreshAll then ns.RefreshAll() end
 
 	elseif event == "TRADE_SKILL_SHOW" then
+		if ns.InstallProfessionHooks then ns.InstallProfessionHooks() end
 		if ns.ScheduleCapture then ns.ScheduleCapture(false) end
 		if ns.RefreshBreakdown then ns.RefreshBreakdown() end
+		if ns.ScheduleProfessionRefresh then ns.ScheduleProfessionRefresh() end
 
 	elseif event == "TRADE_SKILL_UPDATE" then
 		if ns.RefreshVisibleRecipeTags then ns.RefreshVisibleRecipeTags() end
+		if ns.RefreshBreakdown then ns.RefreshBreakdown() end
+		if ns.ScheduleProfessionRefresh then ns.ScheduleProfessionRefresh() end
 
 	elseif event == "NEW_RECIPE_LEARNED" then
 		if ns.ScheduleCapture then ns.ScheduleCapture(true) end

@@ -148,7 +148,8 @@ function ns.RefreshVisibleRecipeTags()
 	local ok = pcall(function()
 		for button in scrollBox:EnumerateFrames() do
 			local elementData = button.GetElementData and button:GetElementData()
-			local recipeInfo = elementData and elementData.data and elementData.data.recipeInfo
+			local recipeInfo = elementData
+				and ((elementData.data and elementData.data.recipeInfo) or elementData.recipeInfo)
 			if recipeInfo then
 				ns.UpdateRecipeRowTag(button, recipeInfo)
 			end
@@ -157,6 +158,30 @@ function ns.RefreshVisibleRecipeTags()
 	if not ok then
 		-- A partially constructed scroll frame can be ignored.
 	end
+end
+
+function ns.RefreshProfessionUI()
+	if ns.InstallProfessionHooks then ns.InstallProfessionHooks() end
+	ns.RefreshVisibleRecipeTags()
+	if ns.RefreshBreakdown then ns.RefreshBreakdown() end
+end
+
+-- The profession frame can finish building its recipe list just after
+-- TRADE_SKILL_SHOW. Refresh once the layout settles as well.
+function ns.ScheduleProfessionRefresh()
+	if not ns.professionDelayedRefresh then
+		ns.professionDelayedRefresh = true
+		ns.After(1.2, function()
+			ns.professionDelayedRefresh = false
+			ns.RefreshProfessionUI()
+		end)
+	end
+	if ns.professionRefreshScheduled then return end
+	ns.professionRefreshScheduled = true
+	ns.After(0.3, function()
+		ns.professionRefreshScheduled = false
+		ns.RefreshProfessionUI()
+	end)
 end
 
 function ns.RefreshProfessionList()
@@ -187,12 +212,7 @@ function ns.AddFilterMenuItems(rootDescription)
 end
 
 function ns.UpdateRecipeRowTag(button, recipeInfo)
-	if not button or not recipeInfo or not ns.db then return end
-
-	if _G.Professions and type(_G.Professions.GetHighestLearnedRecipe) == "function" then
-		local ok, highest = pcall(_G.Professions.GetHighestLearnedRecipe, recipeInfo)
-		if ok and highest then recipeInfo = highest end
-	end
+	if not button or not ns.db then return end
 
 	local tag = button.OpenMarginTag
 	if not tag then
@@ -210,11 +230,31 @@ function ns.UpdateRecipeRowTag(button, recipeInfo)
 		tag:SetPoint("RIGHT", button, "RIGHT", -4, 0)
 	end
 
+	-- Show a neutral tag first. If anything below fails, the row still gets a
+	-- visible "—" instead of silently losing the whole tag.
+	tag:SetText("—")
+	tag:SetTextColor(0.55, 0.55, 0.55)
+	tag:Show()
+
+	if not recipeInfo then return end
+
+	if _G.Professions and type(_G.Professions.GetHighestLearnedRecipe) == "function" then
+		local ok, highest = pcall(_G.Professions.GetHighestLearnedRecipe, recipeInfo)
+		if ok and highest then recipeInfo = highest end
+	end
+	if not recipeInfo.recipeID then return end
+
 	local existing = ns.GetRecipe(recipeInfo.recipeID)
 	if not existing or not existing.schemaLoaded then
-		ns.EnsureRecipe(recipeInfo.recipeID)
+		local ok, err = pcall(ns.EnsureRecipe, recipeInfo.recipeID)
+		if not ok then ns.ReportError(err) end
 	end
-	local econ = ns.GetCachedEconomics(recipeInfo.recipeID)
+
+	local econOk, econ = pcall(ns.GetCachedEconomics, recipeInfo.recipeID)
+	if not econOk then
+		ns.ReportError(econ)
+		econ = nil
+	end
 	local text, r, g, b = ns.GetTag(econ)
 	tag:SetText(text)
 	tag:SetTextColor(r, g, b)
@@ -255,7 +295,8 @@ end
 function ns.OnRecipeRowInit(button, node)
 	if not button or not node or not ns.db then return end
 	local elementData = node:GetData()
-	local recipeInfo = elementData and elementData.recipeInfo
+	local recipeInfo = elementData
+		and ((elementData.data and elementData.data.recipeInfo) or elementData.recipeInfo)
 	if not recipeInfo then return end
 	ns.UpdateRecipeRowTag(button, recipeInfo)
 end
