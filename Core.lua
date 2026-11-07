@@ -155,6 +155,11 @@ end
 
 function ns.GetStatusLines()
 	local api = ns.GetAuctionatorAPI()
+	local addonVersion = "unknown"
+	if _G.C_AddOns and type(_G.C_AddOns.GetAddOnMetadata) == "function" then
+		local ok, value = pcall(_G.C_AddOns.GetAddOnMetadata, addonName, "Version")
+		if ok and value then addonVersion = value end
+	end
 	local build = "unknown"
 	if type(_G.GetBuildInfo) == "function" then
 		local ok, version, buildNumber, _, interface = pcall(_G.GetBuildInfo)
@@ -166,6 +171,7 @@ function ns.GetStatusLines()
 	local lastCapture = ns.db and ns.db.meta and ns.db.meta.lastCaptureAt
 	local captureText = lastCapture and (ns.FormatAge(time() - lastCapture) or "unknown") or "never"
 	local lines = {
+		"OpenMargin version: " .. addonVersion,
 		"Build: " .. build,
 		"Auctionator API: " .. (api and "available" or "NOT AVAILABLE"),
 		"Tag mode: " .. tostring(ns.db.settings.tag) .. ", net mode: " .. tostring(ns.db.settings.net)

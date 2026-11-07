@@ -8,9 +8,9 @@ local addonName, ns = ...
 -- are in the same button becomes "Buy N". Clicks made while searching are
 -- ignored, which makes it safe to spam the button.
 
-local SEARCH_TIMEOUT = 6
+local SEARCH_TIMEOUT = 10
 local PLAN_MAX_AGE = 2
-local QUOTE_TIMEOUT = 5
+local QUOTE_TIMEOUT = 15
 local PURCHASE_TIMEOUT = 30
 local AUTO_SEARCH_DELAY = 0.6
 
@@ -490,6 +490,14 @@ local function hideBuyDialog()
 	end
 end
 
+local function throttleReady()
+	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.IsThrottledMessageSystemReady) == "function" then
+		local ok, ready = pcall(_G.C_AuctionHouse.IsThrottledMessageSystemReady)
+		if ok then return ready == true end
+	end
+	return nil
+end
+
 function ns.StartBuy(rule)
 	local state = ns.GetBuyState(rule)
 	local plan = state.plan
@@ -554,6 +562,9 @@ function ns.StartBuy(rule)
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if ns.buyPending == pending and pending.phase == "quote" then
+			local dialogShown = _G.AuctionHouseFrame and _G.AuctionHouseFrame.BuyDialog
+				and _G.AuctionHouseFrame.BuyDialog:IsShown() or false
+			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()))
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 			hideBuyDialog()
 			ns.buyPending = nil
@@ -778,6 +789,19 @@ function ns.OnBuyEvent(event, ...)
 		if not ns.actionBlockedReported then
 			ns.actionBlockedReported = true
 			ns.Print("An action was blocked (" .. tostring(blockedFunction or blockedAddon or "?") .. "). Run /om buylog and send the log.")
+		end
+	elseif type(event) == "string" and event:find("^AUCTION_HOUSE_THROTTLED_") then
+		local pending = ns.buyPending
+		log("throttle event=%s pending=%s phase=%s ready=%s", tostring(event), tostring(pending ~= nil), tostring(pending and pending.phase or nil), tostring(throttleReady()))
+		if event == "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED" and pending and pending.phase == "quote" then
+			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
+			hideBuyDialog()
+			ns.buyPending = nil
+			local state = ns.GetBuyState(pending.rule)
+			state.phase = "idle"
+			state.plan = nil
+			state.status = "The auction house dropped the request - click again"
+			refreshRule(pending.rule)
 		end
 	elseif event == "COMMODITY_PRICE_UPDATED" then
 		local unitPrice, totalPrice = ...
@@ -1408,6 +1432,11 @@ local buyEvents = {
 	"COMMODITY_PURCHASE_SUCCEEDED",
 	"COMMODITY_PURCHASE_FAILED",
 	"AUCTION_HOUSE_SHOW_ERROR",
+	"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
+	"AUCTION_HOUSE_THROTTLED_MESSAGE_QUEUED",
+	"AUCTION_HOUSE_THROTTLED_MESSAGE_SENT",
+	"AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED",
+	"AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED",
 	"ADDON_ACTION_BLOCKED",
 	"ADDON_ACTION_FORBIDDEN",
 	"GET_ITEM_INFO_RECEIVED",
