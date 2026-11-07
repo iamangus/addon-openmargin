@@ -101,15 +101,19 @@ The **Vendor Flip** tab (or `/om vendor`) scans the Auction House for auctions
 whose buyout is below what a vendor pays for the item.
 
 1. Set a **Spend cap** (blank = no cap). The cap resets on every new scan.
+   **Max over vendor** lets you include deals priced up to that much above the
+   vendor price per unit. Leave it blank or `0` for the original strict flip;
+   enter `5c` to list commodities within 5 copper of their vendor price.
 2. Click **Scan**. OpenMargin reads the Auction House summary, then searches
    each item that could possibly vendor for a profit.
-3. Deals are ranked by **percent profit margin**. You do not have to wait for
-   the scan to finish: as soon as a deal is found the button is live and buys
-   the best deal found so far. The scan pauses while a purchase or native
-   Buyout is in progress and resumes after. For a commodity it buys all
-   affordable units below vendor price in one purchase. For a non-commodity
-   auction it opens the item in the native Buy tab; click the listing and
-   **Buyout** there (Blizzard requires that final click).
+3. Deals are ranked by **percent profit margin**. The **Over** column shows how
+   far the unit price is above or below the vendor price. You do not have to
+   wait for the scan to finish: as soon as a deal is found the button is live
+   and buys the best deal found so far. The scan pauses while a purchase or
+   native Buyout is in progress and resumes after. For a commodity it buys all
+   affordable units within your over-vendor limit in one purchase. For a
+   non-commodity auction it opens the item in the native Buy tab; click the
+   listing and **Buyout** there (Blizzard requires that final click).
 4. As you spend, deals beyond the remaining cap or money are skipped. Clicking
    the same button continues down the list.
 

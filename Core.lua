@@ -15,6 +15,7 @@ ns.defaults = {
 		ahCut = 5,
 		buyDebug = false,
 		vendorCap = 0,
+		vendorOver = 0,
 	},
 	recipes = {},
 	known = {},
@@ -74,6 +75,7 @@ function ns.InitDB()
 	settings.panel = settings.panel ~= false
 	settings.buyDebug = settings.buyDebug == true
 	settings.vendorCap = math.max(0, tonumber(settings.vendorCap) or 0)
+	settings.vendorOver = math.max(0, tonumber(settings.vendorOver) or 0)
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end

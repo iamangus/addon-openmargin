@@ -51,6 +51,14 @@ function ns.GetVendorCap()
 	return cap
 end
 
+-- How many copper above the vendor sell price a unit may cost and still be
+-- listed. 0 keeps the original "only below vendor" flip.
+function ns.GetVendorOver()
+	local over = ns.db and ns.db.settings and tonumber(ns.db.settings.vendorOver) or 0
+	if over < 0 then over = 0 end
+	return over
+end
+
 function ns.GetVendorRemaining()
 	local money = ns.GetBuyMoney()
 	local remaining = money
@@ -65,12 +73,18 @@ end
 
 function ns.ComputeCommodityDeal(deal)
 	if not deal or not deal.sellPrice then return false end
+	local over = ns.GetVendorOver()
+	local limit = deal.sellPrice + over
 	local remaining = ns.GetVendorRemaining()
 	local quantity, cost = 0, 0
 	local tiers = deal.tiers or {}
 	for index = 1, #tiers do
 		local tier = tiers[index]
-		if tier.unitPrice >= deal.sellPrice then break end
+		if over == 0 then
+			if tier.unitPrice >= deal.sellPrice then break end
+		elseif tier.unitPrice > limit then
+			break
+		end
 		local affordable = math.floor((remaining - cost) / tier.unitPrice)
 		if affordable <= 0 then break end
 		local take = math.min(tier.quantity, affordable)
@@ -82,12 +96,15 @@ function ns.ComputeCommodityDeal(deal)
 	deal.vendorValue = quantity * deal.sellPrice
 	deal.profit = deal.vendorValue - cost
 	deal.margin = cost > 0 and deal.profit / cost or nil
-	return quantity > 0 and deal.profit > 0
+	deal.maxUnit = limit
+	deal.over = over
+	return quantity > 0 and (over > 0 or deal.profit > 0)
 end
 
 function ns.VendorDeals()
 	local vendor = ns.vendor
 	local remaining = ns.GetVendorRemaining()
+	local over = ns.GetVendorOver()
 	local list = {}
 	for index = 1, #vendor.deals do
 		local deal = vendor.deals[index]
@@ -96,7 +113,9 @@ function ns.VendorDeals()
 				list[#list + 1] = deal
 			end
 		elseif deal.kind == "item" then
-			if not deal.opened and deal.profit > 0 and deal.buyout <= remaining then
+			local tolerance = over * (deal.count or 0)
+			local within = over > 0 and deal.buyout <= (deal.vendorValue or 0) + tolerance or (deal.profit or 0) > 0
+			if not deal.opened and within and deal.buyout <= remaining then
 				list[#list + 1] = deal
 			end
 		end
@@ -127,17 +146,22 @@ local function refreshVendorFrame()
 
 	local deals = ns.VendorDeals()
 	local cap = ns.GetVendorCap()
+	local over = ns.GetVendorOver()
 	local remaining = ns.GetVendorRemaining()
 	local money = ns.GetBuyMoney()
 
 	if ns.vendorCapBox and not ns.vendorCapBox:HasFocus() then
 		ns.vendorCapBox:SetText(cap > 0 and ns.FormatMoneyInput(cap) or "")
 	end
+	if ns.vendorOverBox and not ns.vendorOverBox:HasFocus() then
+		ns.vendorOverBox:SetText(over > 0 and ns.FormatMoneyInput(over) or "")
+	end
 
 	if vendor.status then
 		ns.vendorStatus:SetText(vendor.status)
 	end
 	local capText = "Cap: " .. (cap > 0 and ns.FormatMoneyInput(cap) or "none")
+		.. "   Over: " .. (over > 0 and ns.FormatMoneyInput(over) or "0")
 		.. "   Left: " .. ns.FormatMoneyInput(remaining)
 		.. "   Money: " .. ns.FormatMoneyInput(money or 0)
 	if vendor.scanState == "scanning" then
@@ -173,7 +197,7 @@ local function refreshVendorFrame()
 			normal:Disable()
 		elseif top and activeScan then
 			if top.kind == "item" then
-				normal:SetText(string.format("Open next +%d%%", math.floor((top.margin or 0) * 100 + 0.5)))
+				normal:SetText("Open next " .. ns.FormatPercent(top.margin, true))
 			else
 				normal:SetText(string.format("Buy %d", top.quantity))
 			end
@@ -242,26 +266,33 @@ function ns.CreateVendorRow(parent)
 		return text
 	end
 
-	row.itemText = label(14, 220)
-	row.typeText = label(240, 70)
-	row.qtyText = label(310, 50)
-	row.costText = label(360, 80)
-	row.vendorText = label(440, 80)
-	row.profitText = label(520, 80)
-	row.marginText = label(610, 70)
+	row.itemText = label(14, 190)
+	row.typeText = label(208, 60)
+	row.qtyText = label(272, 40)
+	row.costText = label(316, 75)
+	row.vendorText = label(396, 75)
+	row.profitText = label(476, 75)
+	row.overText = label(556, 60)
+	row.marginText = label(621, 70)
 	return row
 end
 
 function ns.UpdateVendorRow(row, isTop)
 	local deal = row.rule
 	if not deal then return end
+	local qty = deal.quantity or deal.count or 0
+	local cost = deal.cost or deal.buyout or 0
+	local unit = qty > 0 and cost / qty or 0
+	local overValue = unit - (deal.sellPrice or 0)
+
 	row.itemText:SetText(deal.name or itemName(deal.itemID))
 	row.typeText:SetText(deal.kind == "commodity" and "Commodity" or "Item")
-	row.qtyText:SetText(tostring(deal.quantity or deal.count or 0))
-	row.costText:SetText(ns.FormatMoneyInput(deal.cost or deal.buyout or 0))
+	row.qtyText:SetText(tostring(qty))
+	row.costText:SetText(ns.FormatMoneyInput(cost))
 	row.vendorText:SetText(ns.FormatMoneyInput(deal.vendorValue or 0))
-	row.profitText:SetText(ns.FormatMoneyInput(deal.profit or 0))
-	row.marginText:SetText(deal.margin and string.format("+%d%%", math.floor(deal.margin * 100 + 0.5)) or "—")
+	row.profitText:SetText(ns.FormatMoney(deal.profit or 0, true))
+	row.overText:SetText(ns.FormatMoney(overValue, true))
+	row.marginText:SetText(deal.margin and ns.FormatPercent(deal.margin, true) or "—")
 	row.bg:SetColorTexture(1, 1, 1, isTop and 0.10 or 0.035)
 end
 
@@ -355,7 +386,8 @@ function ns.ProcessVendorBrowseResults(token)
 			vendor.seenItems[variantKey] = true
 			local minPrice = tonumber(result.minPrice)
 			local sellPrice = itemSellPrice(itemID)
-			if minPrice and sellPrice and minPrice > 0 and minPrice < sellPrice then
+			local over = ns.GetVendorOver()
+			if minPrice and sellPrice and minPrice > 0 and minPrice <= sellPrice + over then
 				local keyInfo
 				if type(api.GetItemKeyInfo) == "function" then
 					local ok, value = pcall(api.GetItemKeyInfo, itemKey)
@@ -491,10 +523,13 @@ function ns.BuildCommodityVendorDeal(candidate)
 		if ok and type(value) == "number" then count = value end
 	end
 	local tiers = {}
+	local over = ns.GetVendorOver()
+	local limit = candidate.sellPrice + over
 	for index = 1, count do
 		local infoOk, info = pcall(api.GetCommoditySearchResultInfo, itemID, index)
 		if infoOk and type(info) == "table" and type(info.unitPrice) == "number" then
-			if info.unitPrice < candidate.sellPrice then
+			local within = over > 0 and info.unitPrice <= limit or info.unitPrice < candidate.sellPrice
+			if within then
 				local own = tonumber(info.numOwnerItems) or 0
 				local quantity = (tonumber(info.quantity) or 0) - own
 				if quantity > 0 then
@@ -541,7 +576,9 @@ function ns.BuildItemVendorDeals(candidate)
 				and not info.containsOwnerItem and not info.containsAccountItem then
 				local vendorValue = candidate.sellPrice * quantity
 				local profit = vendorValue - buyout
-				if profit > 0 then
+				local over = ns.GetVendorOver()
+				local within = over > 0 and buyout <= vendorValue + over * quantity or profit > 0
+				if within then
 					local deal = {
 						kind = "item",
 						itemID = candidate.itemID,
@@ -645,7 +682,8 @@ function ns.BeginVendorBuy()
 		itemID = deal.itemID,
 		quantity = deal.quantity,
 		cost = deal.cost,
-		maxUnit = deal.sellPrice,
+		maxUnit = deal.maxUnit or (deal.sellPrice + ns.GetVendorOver()),
+		over = ns.GetVendorOver(),
 	}
 	local pending = {
 		deal = deal,
@@ -693,10 +731,11 @@ function ns.HandleVendorPrice(unitPrice, totalPrice)
 	local plan = pending.plan
 	local deal = pending.deal
 	local remaining = ns.GetVendorRemaining()
-	local within = unitPrice < deal.sellPrice
+	local over = tonumber(plan.over) or ns.GetVendorOver()
+	local within = (over > 0 and unitPrice <= plan.maxUnit or unitPrice < deal.sellPrice)
 		and totalPrice <= plan.cost
 		and totalPrice <= remaining
-	log("vendor quote unit=%s total=%s sell=%s planCost=%s remaining=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(deal.sellPrice), tostring(plan.cost), tostring(remaining), tostring(within))
+	log("vendor quote unit=%s total=%s sell=%s limit=%s planCost=%s remaining=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(deal.sellPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(within))
 
 	if not within then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -991,6 +1030,27 @@ function ns.CreateVendorFrame(ah)
 	end)
 	ns.vendorCapBox = capBox
 
+	local overLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	overLabel:SetPoint("LEFT", capBox, "RIGHT", 18, 0)
+	overLabel:SetText("Max over vendor:")
+	ns.vendorOverLabel = overLabel
+
+	local overBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+	overBox:SetSize(70, 20)
+	overBox:SetPoint("LEFT", overLabel, "RIGHT", 6, 0)
+	overBox:SetAutoFocus(false)
+	overBox:SetMaxLetters(20)
+	overBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	overBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	overBox:SetScript("OnEditFocusLost", function(self)
+		local value = ns.ParseMoneyInput(self:GetText())
+		if not value or value < 0 then value = 0 end
+		ns.db.settings.vendorOver = value
+		self:SetText(value > 0 and ns.FormatMoneyInput(value) or "")
+		ns.RefreshVendorFrame()
+	end)
+	ns.vendorOverBox = overBox
+
 	local status = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	status:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -82)
 	status:SetWidth(560)
@@ -1036,13 +1096,14 @@ function ns.CreateVendorFrame(ah)
 	ns.vendorSecureButton = secure
 
 	local headers = {
-		{ text = "Item", x = 14, width = 220 },
-		{ text = "Type", x = 240, width = 70 },
-		{ text = "Qty", x = 310, width = 50 },
-		{ text = "Cost", x = 360, width = 80 },
-		{ text = "Vendor", x = 440, width = 80 },
-		{ text = "Profit", x = 520, width = 80 },
-		{ text = "Margin", x = 610, width = 70 },
+		{ text = "Item", x = 14, width = 190 },
+		{ text = "Type", x = 208, width = 60 },
+		{ text = "Qty", x = 272, width = 40 },
+		{ text = "Cost", x = 316, width = 75 },
+		{ text = "Vendor", x = 396, width = 75 },
+		{ text = "Profit", x = 476, width = 75 },
+		{ text = "Over", x = 556, width = 60 },
+		{ text = "Margin", x = 621, width = 70 },
 	}
 	for index = 1, #headers do
 		local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
