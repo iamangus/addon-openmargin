@@ -84,6 +84,33 @@ function ns.GetAuctionatorPrice(itemID)
 	return nil
 end
 
+-- Estimated Auction House value of the materials from disenchanting an item,
+-- in copper. Auctionator exposes this directly; Disenchant Value's public API
+-- is used as a fallback.
+function ns.GetDisenchantValue(itemID)
+	if not itemID or (_G.issecretvalue and _G.issecretvalue(itemID)) or itemID <= 0 then return nil end
+
+	local api = ns.GetAuctionatorAPI()
+	local getValue = api and api.GetDisenchantPriceByItemID
+	if type(getValue) == "function" then
+		local ok, value = pcall(getValue, API_CALLER, itemID)
+		if ok and type(value) == "number" and not (_G.issecretvalue and _G.issecretvalue(value)) and value > 0 then
+			return math.floor(value + 0.5), "Auctionator"
+		end
+	end
+
+	local dv = _G.DisenchantValueAPI
+	local getLearned = dv and dv.GetValue
+	if type(getLearned) == "function" then
+		local ok, value = pcall(getLearned, itemID)
+		if ok and type(value) == "number" and not (_G.issecretvalue and _G.issecretvalue(value)) and value > 0 then
+			return math.floor(value + 0.5), "Disenchant Value"
+		end
+	end
+
+	return nil
+end
+
 -- Auctionator's public price API does not document an age call. The original
 -- addon uses it opportunistically when present. Its age is normally expressed
 -- in days; some builds may return seconds or an epoch timestamp.

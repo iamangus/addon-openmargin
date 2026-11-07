@@ -221,6 +221,8 @@ function ns.RefreshAll()
 		if ns.RefreshBreakdown then ns.RefreshBreakdown() end
 		if ns.RefreshTrainer then ns.RefreshTrainer() end
 		if ns.RefreshBuyFrame then ns.RefreshBuyFrame() end
+		if ns.RefreshVendorFrame then ns.RefreshVendorFrame() end
+		if ns.RefreshDisenchantFrame then ns.RefreshDisenchantFrame() end
 		if ns.RefreshOptions then ns.RefreshOptions() end
 	end)
 	if not ok then ns.ReportError(err) end

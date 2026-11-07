@@ -23,6 +23,7 @@ local function printHelp()
 		"/om refresh — clear the price cache and redraw",
 		"/om buy — open the Buy Orders tab in the Auction House",
 		"/om vendor — open the Vendor Flip tab in the Auction House",
+		"/om de — open the Disenchant Flip tab in the Auction House",
 		"/om buydebug — toggle Auction House buy logging",
 		"/om buylog — show/copy the buy log",
 		"/om recapture — rebuild the open profession's recipe data",
@@ -106,13 +107,17 @@ local function handleCommand(message)
 		end
 
 	elseif command == "vendor" then
-		local basis = rest:lower()
-		if basis == "scanfree" or basis == "full" then
-			ns.db.settings.vendorBasis = basis
-			ns.OnSettingChanged()
-			ns.Print("Vendor net basis: " .. basis)
+		if rest == "" then
+			if ns.OpenVendorFlip then ns.OpenVendorFlip() end
 		else
-			ns.Print("Usage: /om vendor scanfree|full")
+			local basis = rest:lower()
+			if basis == "scanfree" or basis == "full" then
+				ns.db.settings.vendorBasis = basis
+				ns.OnSettingChanged()
+				ns.Print("Vendor net basis: " .. basis)
+			else
+				ns.Print("Usage: /om vendor [scanfree|full]")
+			end
 		end
 
 	elseif command == "source" then
@@ -133,8 +138,8 @@ local function handleCommand(message)
 	elseif command == "buy" then
 		if ns.OpenBuyOrders then ns.OpenBuyOrders() end
 
-	elseif command == "vendor" then
-		if ns.OpenVendorFlip then ns.OpenVendorFlip() end
+	elseif command == "de" or command == "disenchant" then
+		if ns.OpenDisenchantFlip then ns.OpenDisenchantFlip() end
 
 	elseif command == "buydebug" then
 		if ns.ToggleBuyDebug then ns.ToggleBuyDebug() end

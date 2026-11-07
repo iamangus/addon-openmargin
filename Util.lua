@@ -133,7 +133,7 @@ function ns.GetItemInfo(itemID)
 	if not itemID or (_G.issecretvalue and _G.issecretvalue(itemID)) or itemID <= 0 then return nil end
 	local info = {}
 	if _G.C_Item and type(_G.C_Item.GetItemInfo) == "function" then
-		local ok, name, link, quality, itemLevel, minLevel, itemType, itemSubType, stackCount, equipLoc, texture, sellPrice = pcall(_G.C_Item.GetItemInfo, itemID)
+		local ok, name, link, quality, itemLevel, minLevel, itemType, itemSubType, stackCount, equipLoc, texture, sellPrice, classID, subclassID = pcall(_G.C_Item.GetItemInfo, itemID)
 		if ok then
 			info.name = name
 			info.link = link
@@ -143,10 +143,12 @@ function ns.GetItemInfo(itemID)
 			info.itemSubType = itemSubType
 			info.texture = texture
 			info.sellPrice = sellPrice
+			info.classID = classID
+			info.subclassID = subclassID
 		end
 	end
 	if not info.name and type(_G.GetItemInfo) == "function" then
-		local ok, name, link, quality, itemLevel, minLevel, itemType, itemSubType, stackCount, equipLoc, texture, sellPrice = pcall(_G.GetItemInfo, itemID)
+		local ok, name, link, quality, itemLevel, minLevel, itemType, itemSubType, stackCount, equipLoc, texture, sellPrice, classID, subclassID = pcall(_G.GetItemInfo, itemID)
 		if ok then
 			info.name = name
 			info.link = link
@@ -156,12 +158,29 @@ function ns.GetItemInfo(itemID)
 			info.itemSubType = itemSubType
 			info.texture = texture
 			info.sellPrice = sellPrice
+			info.classID = classID
+			info.subclassID = subclassID
 		end
 	end
 	if not info.name and _G.C_Item and type(_G.C_Item.RequestLoadItemDataByID) == "function" then
 		pcall(_G.C_Item.RequestLoadItemDataByID, itemID)
 	end
 	return info
+end
+
+-- Fast class lookup for auction results that are not fully cached yet.
+function ns.GetItemClassID(itemID)
+	if not itemID or (_G.issecretvalue and _G.issecretvalue(itemID)) or itemID <= 0 then return nil end
+	if _G.C_Item and type(_G.C_Item.GetItemInfoInstant) == "function" then
+		local ok, _, _, _, _, _, classID = pcall(_G.C_Item.GetItemInfoInstant, itemID)
+		if ok and classID then return classID end
+	end
+	if type(_G.GetItemInfoInstant) == "function" then
+		local ok, _, _, _, _, _, classID = pcall(_G.GetItemInfoInstant, itemID)
+		if ok and classID then return classID end
+	end
+	local info = ns.GetItemInfo(itemID)
+	return info and info.classID
 end
 
 function ns.GetItemName(itemID)

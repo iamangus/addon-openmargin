@@ -12,10 +12,13 @@ internal strings were copied from the reference addon.
 
 - World of Warcraft: Forever, interface `16001`
 - **Auctionator** installed and enabled
+- For **Disenchant Flip**, either Auctionator's disenchant price API or the
+  **Disenchant Value** addon (its `DisenchantValueAPI`)
 
-OpenMargin does not scan the Auction House itself. It reads the last price
-Auctionator has stored. Run Auctionator's own scan to refresh prices; an open
-profession window updates automatically when the scan finishes.
+Crafting prices come from Auctionator's last stored scan. Run Auctionator's own
+scan to refresh them; an open profession window updates automatically when the
+scan finishes. The **Buy Orders**, **Vendor Flip**, and **Disenchant Flip** tabs
+query the Auction House themselves when you click Scan.
 
 ## What it does
 
@@ -49,6 +52,9 @@ profession window updates automatically when the scan finishes.
   more than their buyout, ranked by percent margin, with a per-scan spending
   cap. Commodities are bought through the secure Auction House Buy button;
   non-commodity deals open in the native Buy tab for the final Buyout click.
+- **Disenchant Flip tab in the Auction House.** Scan armor and weapons whose
+  buyout is below the value of the enchanting materials they disenchant into.
+  The best deal opens in the native Buy tab; buy it and disenchant it manually.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
 
@@ -111,6 +117,28 @@ The scan is a snapshot, not a live feed. Commodity purchases use the same
 secure Auction House Buy button as Buy Orders; the purchase quote is checked
 against the vendor value before confirming. Items with no cached vendor sell
 price are skipped until their item data loads.
+
+## Disenchant Flip
+
+The **Disenchant Flip** tab (or `/om de`) scans the Auction House for armor and
+weapons whose **buyout is below the estimated value of their disenchant
+materials**.
+
+1. Click **Scan**. OpenMargin reads the Auction House summary and filters it to
+   armor and weapons.
+2. Each candidate item is valued through Auctionator's disenchant API. If
+   Auctionator does not provide a value, OpenMargin falls back to
+   `DisenchantValueAPI` from the Disenchant Value addon.
+3. Deals are ranked by percent margin. The button opens the best deal in the
+   native **Buy** tab; click the listing and **Buyout** there, then disenchant
+   the item normally.
+4. Items with no disenchant value, no price, or a buyout above their material
+   value are skipped.
+
+Blizzard does not expose disenchant loot tables. Addons that show disenchant
+results either bundle a table of quality/class/item-level rules or record your
+own disenchants. OpenMargin reads a public API when one is available rather than
+shipping its own table.
 
 ## Buy order diagnostics
 
@@ -195,6 +223,7 @@ recipes are captured.
 | `/om options` | Open the settings panel |
 | `/om buy` | Open the Buy Orders tab in the Auction House |
 | `/om vendor` | Open the Vendor Flip tab in the Auction House |
+| `/om de` | Open the Disenchant Flip tab in the Auction House |
 | `/om sort` | Toggle sort by profit |
 | `/om tag profit\|margin\|both` | Choose the recipe tag |
 | `/om net ah\|vendor` | Choose Auction House or vendor net |

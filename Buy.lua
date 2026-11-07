@@ -922,6 +922,8 @@ local function selectOwnTab()
 	end
 	if ns.vendorAhTab then PanelTemplates_DeselectTab(ns.vendorAhTab) end
 	if ns.vendorFrame then ns.vendorFrame:Hide() end
+	if ns.disAhTab then PanelTemplates_DeselectTab(ns.disAhTab) end
+	if ns.disFrame then ns.disFrame:Hide() end
 	PanelTemplates_SelectTab(ns.ahTab)
 	ah:SetTitle("Buy Orders")
 

@@ -867,6 +867,8 @@ function ns.SelectVendorTab()
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do PanelTemplates_DeselectTab(tabs[index]) end
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end
+	if ns.disAhTab then PanelTemplates_DeselectTab(ns.disAhTab) end
+	if ns.disFrame then ns.disFrame:Hide() end
 	if ns.vendorAhTab then PanelTemplates_SelectTab(ns.vendorAhTab) end
 	ah:SetTitle("Vendor Flip")
 	if ns.buyFrame then ns.buyFrame:Hide() end
