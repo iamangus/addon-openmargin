@@ -705,7 +705,9 @@ function ns.BeginSnipeBuy()
 		return
 	end
 	if ns.snipeSecureButton then ns.snipeSecureButton:SetText("Buying...") end
-	ns.RefreshSniperFrame()
+	ns.After(0, function()
+		if state.pending == pending then ns.RefreshSniperFrame() end
+	end)
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if state.pending == pending and pending.phase == "quote" then

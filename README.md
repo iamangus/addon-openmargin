@@ -86,21 +86,23 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
    name in the Item box.
 2. Set **Max each** (for example `13c`) and **Budget** (for example `10s`).
    Accepted input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
-3. Click the row button. It changes from **Search** to **Searching...** and
-   then to **Buy N** when results are in.
-4. Click the same button again to buy. Clicks made while searching or buying
-   are ignored, so it is safe to spam the same spot.
+3. Click **Search**. The row starts a search loop; the button changes to
+   **Stop** while the loop is running.
+4. **Buy** stays greyed out until a plan is ready, then lights up with the
+   available quantity. Spam **Buy** to buy each new plan; the loop searches
+   again after each purchase and while no listings are available.
 
 The purchase is quantity-based and always takes the cheapest units first. Only
 units at or below **Max each** are included, and the confirmed unit price and
 total are checked again; if the market moved above your limit, the purchase is
-cancelled and the row goes back to Search. The secure Buy button is armed as
-soon as the plan is ready, before the row redraw, and the purchase confirmation
-is sent before the UI update to reduce the race window.
+cancelled and the loop searches again. The secure Buy button is armed as soon as
+the plan is ready, before the row redraw, and the purchase confirmation is sent
+before the UI update to reduce the race window.
 
-The Buy Orders search is one-shot: each **Search** returns the listings available
-at that moment. For continuous commodity sniping, use the **Sniper** tab instead. **Remaining** is the budget minus
-what this order has spent; **Reset** gives it a fresh budget.
+Each search is still a snapshot, and Blizzard throttles queries, so this is a
+per-item search loop rather than a full-market sniper. For a multi-item watchlist,
+use the **Sniper** tab. **Remaining** is the budget minus what this order has
+spent; **Reset** gives it a fresh budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
 
