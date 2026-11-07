@@ -1,0 +1,20 @@
+## Interface: 16001
+## Title: OpenMargin
+## Notes: Recipe profit, reagent costs, vendor net and trainer value using Auctionator prices. Requires Auctionator.
+## Author: OpenMargin
+## Version: 0.1.0
+## SavedVariables: OpenMarginDB
+## OptionalDeps: Auctionator
+## X-Category: Auction/Economy
+## IconTexture: Interface\Icons\INV_Misc_Coin_02
+
+Util.lua
+Prices.lua
+Costing.lua
+Recipes.lua
+Core.lua
+Professions.lua
+Trainer.lua
+Tooltips.lua
+Options.lua
+Commands.lua
