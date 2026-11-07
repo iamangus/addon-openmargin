@@ -15,6 +15,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check tag matches TOC version
+        run: |
+          version="$(sed -n 's/^## Version:[[:space:]]*//p' OpenMargin.toc | head -n1)"
+          test "v${version}" = "${GITHUB_REF_NAME}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match TOC version v${version}"
+            exit 1
+          }
+
       - name: Package addon
         run: ./scripts/package.sh
 
