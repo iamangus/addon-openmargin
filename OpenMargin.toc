@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: OpenMargin
-## Notes: Recipe profit, reagent costs, vendor net, trainer value and Auction House buy orders using Auctionator prices. Requires Auctionator.
+## Notes: Recipe profit, reagent costs, vendor net, trainer value, Auction House buy orders and vendor flipping using Auctionator prices. Requires Auctionator.
 ## Author: OpenMargin
-## Version: 0.2.5
+## Version: 0.3.0
 ## SavedVariables: OpenMarginDB
 ## OptionalDeps: Auctionator
 ## X-Category: Auction/Economy
@@ -16,6 +16,7 @@ Core.lua
 Professions.lua
 Log.lua
 Buy.lua
+Vendor.lua
 Trainer.lua
 Tooltips.lua
 Options.lua

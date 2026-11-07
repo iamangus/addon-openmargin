@@ -14,6 +14,7 @@ ns.defaults = {
 		panel = true,
 		ahCut = 5,
 		buyDebug = false,
+		vendorCap = 0,
 	},
 	recipes = {},
 	known = {},
@@ -62,6 +63,7 @@ function ns.InitDB()
 	settings.tooltips = settings.tooltips ~= false
 	settings.panel = settings.panel ~= false
 	settings.buyDebug = settings.buyDebug == true
+	settings.vendorCap = math.max(0, tonumber(settings.vendorCap) or 0)
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
@@ -146,6 +148,7 @@ function ns.ResetAll()
 	ns.ensureFailed = {}
 	ns.sortContext = nil
 	if ns.ClearBuyRuntime then ns.ClearBuyRuntime() end
+	if ns.ResetVendorState then ns.ResetVendorState() end
 	if ns.ClearBuyLog then ns.ClearBuyLog() end
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()

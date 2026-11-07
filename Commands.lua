@@ -22,6 +22,7 @@ local function printHelp()
 		"/om vendor scanfree|full — vendor net basis",
 		"/om refresh — clear the price cache and redraw",
 		"/om buy — open the Buy Orders tab in the Auction House",
+		"/om vendor — open the Vendor Flip tab in the Auction House",
 		"/om buydebug — toggle Auction House buy logging",
 		"/om buylog — show/copy the buy log",
 		"/om recapture — rebuild the open profession's recipe data",
@@ -131,6 +132,9 @@ local function handleCommand(message)
 
 	elseif command == "buy" then
 		if ns.OpenBuyOrders then ns.OpenBuyOrders() end
+
+	elseif command == "vendor" then
+		if ns.OpenVendorFlip then ns.OpenVendorFlip() end
 
 	elseif command == "buydebug" then
 		if ns.ToggleBuyDebug then ns.ToggleBuyDebug() end

@@ -487,7 +487,7 @@ function ns.HandleItemResults(itemID)
 	end
 end
 
-local function hideBuyDialog()
+function ns.HideBuyDialog()
 	local ah = _G.AuctionHouseFrame
 	if ah and ah.BuyDialog and type(ah.BuyDialog.IsShown) == "function" and ah.BuyDialog:IsShown() then
 		ah.BuyDialog:Hide()
@@ -607,7 +607,7 @@ function ns.StartBuy(rule)
 				and _G.AuctionHouseFrame.BuyDialog:IsShown() or false
 			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()))
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
-			hideBuyDialog()
+			ns.HideBuyDialog()
 			ns.buyPending = nil
 			state.phase = "idle"
 			state.status = "No response from the auction house"
@@ -617,7 +617,7 @@ function ns.StartBuy(rule)
 
 	ns.After(PURCHASE_TIMEOUT, function()
 		if ns.buyPending == pending then
-			hideBuyDialog()
+			ns.HideBuyDialog()
 			ns.buyPending = nil
 			state.phase = "idle"
 			state.status = "Purchase result unknown"
@@ -628,6 +628,7 @@ end
 
 function ns.BeginSecureBuy(row)
 	if not row or not row.rule then return end
+	if ns.vendor and ns.vendor.pending then return end
 	if ns.buyPending then
 		-- A second click while a purchase is pending must not click the native
 		-- Buy button again.
@@ -641,6 +642,7 @@ end
 
 function ns.OnBuyRowClick(rule, row)
 	if not rule then return end
+	if ns.vendor and ns.vendor.pending then return end
 	if row then ns.CommitBuyRow(row) end
 	if ns.buyPending then return end
 
@@ -677,7 +679,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 
 	if not withinLimits then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
-		hideBuyDialog()
+		ns.HideBuyDialog()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.plan = nil
@@ -699,7 +701,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	log("confirm sent ok=%s err=%s", tostring(confirmed), tostring(confirmError))
 	if not confirmed then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
-		hideBuyDialog()
+		ns.HideBuyDialog()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.status = "Purchase could not be confirmed"
@@ -714,7 +716,7 @@ function ns.HandleCommodityUnavailable()
 	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 	end
-	hideBuyDialog()
+	ns.HideBuyDialog()
 	ns.buyPending = nil
 	local state = ns.GetBuyState(pending.rule)
 	state.phase = "idle"
@@ -756,7 +758,7 @@ function ns.HandlePurchaseFailed()
 	log("purchase failed itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
 	ns.buyPending = nil
-	hideBuyDialog()
+	ns.HideBuyDialog()
 	state.phase = "idle"
 	state.plan = nil
 	state.status = "Purchase failed - click to try again"
@@ -772,7 +774,7 @@ function ns.HandleAuctionClosed()
 		if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		end
-		hideBuyDialog()
+		ns.HideBuyDialog()
 		ns.buyPending = nil
 	end
 	-- An in-flight "buy" is left alone so its success event can still record
@@ -796,7 +798,7 @@ function ns.HandleAuctionError(errorCode)
 	local pending = ns.buyPending
 	if pending then
 		ns.buyPending = nil
-		hideBuyDialog()
+		ns.HideBuyDialog()
 		local state = ns.GetBuyState(pending.rule)
 		state.phase = "idle"
 		state.plan = nil
@@ -849,7 +851,7 @@ function ns.OnBuyEvent(event, ...)
 		log("throttle event=%s pending=%s phase=%s ready=%s", tostring(event), tostring(pending ~= nil), tostring(pending and pending.phase or nil), tostring(throttleReady()))
 		if event == "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED" and pending and pending.phase == "quote" then
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
-			hideBuyDialog()
+			ns.HideBuyDialog()
 			ns.buyPending = nil
 			local state = ns.GetBuyState(pending.rule)
 			state.phase = "idle"
@@ -918,6 +920,8 @@ local function selectOwnTab()
 	for index = 1, #tabs do
 		PanelTemplates_DeselectTab(tabs[index])
 	end
+	if ns.vendorAhTab then PanelTemplates_DeselectTab(ns.vendorAhTab) end
+	if ns.vendorFrame then ns.vendorFrame:Hide() end
 	PanelTemplates_SelectTab(ns.ahTab)
 	ah:SetTitle("Buy Orders")
 
@@ -954,10 +958,14 @@ function ns.SetupAuctionTab()
 	local root = CreateFrame("Frame", nil, ah)
 	root:SetSize(10, 10)
 	local anchor = ah.Tabs[#ah.Tabs]
-	local auctionatorTabs = _G.Auctionator and _G.Auctionator.State and _G.Auctionator.State.TabFrameRef
-		and _G.Auctionator.State.TabFrameRef.Tabs
-	if type(auctionatorTabs) == "table" and #auctionatorTabs > 0 then
-		anchor = auctionatorTabs[#auctionatorTabs]
+	if ns.vendorAhTab then
+		anchor = ns.vendorAhTab
+	else
+		local auctionatorTabs = _G.Auctionator and _G.Auctionator.State and _G.Auctionator.State.TabFrameRef
+			and _G.Auctionator.State.TabFrameRef.Tabs
+		if type(auctionatorTabs) == "table" and #auctionatorTabs > 0 then
+			anchor = auctionatorTabs[#auctionatorTabs]
+		end
 	end
 	root:SetPoint("TOPLEFT", anchor, "TOPRIGHT")
 	ns.ahTabRoot = root

@@ -36,6 +36,10 @@ profession window updates automatically when the scan finishes.
 - **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
   price and a budget, then click once to search and again to buy. The budget is
   remaining spend and can be reset per order.
+- **Vendor Flip tab in the Auction House.** Scan for auctions that vendor for
+  more than their buyout, ranked by percent margin, with a per-scan spending
+  cap. Commodities are bought through the secure Auction House Buy button;
+  non-commodity deals open in the native Buy tab for the final Buyout click.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
 
@@ -59,6 +63,27 @@ cancelled and the row goes back to Search. **Remaining** is the budget minus
 what this order has spent; **Reset** gives it a fresh budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
+
+## Vendor Flip
+
+The **Vendor Flip** tab (or `/om vendor`) scans the Auction House for auctions
+whose buyout is below what a vendor pays for the item.
+
+1. Set a **Spend cap** (blank = no cap). The cap resets on every new scan.
+2. Click **Scan**. OpenMargin reads the Auction House summary, then searches
+   each item that could possibly vendor for a profit.
+3. Deals are ranked by **percent profit margin**. The button buys the best one.
+   For a commodity it buys all affordable units below vendor price in one
+   purchase. For a non-commodity auction it opens the item in the native Buy
+   tab; click the listing and **Buyout** there (Blizzard requires that final
+   click).
+4. As you spend, deals beyond the remaining cap or money are skipped. Clicking
+   the same button continues down the list.
+
+The scan is a snapshot, not a live feed. Commodity purchases use the same
+secure Auction House Buy button as Buy Orders; the purchase quote is checked
+against the vendor value before confirming. Items with no cached vendor sell
+price are skipped until their item data loads.
 
 ## Buy order diagnostics
 
@@ -93,6 +118,9 @@ the open on GitHub.
   auction at a time and need a click per auction.
 - Buy orders do not run in the background: the first click searches and the
   second confirms, and nothing is bought without a click.
+- **Vendor Flip uses a snapshot.** It scans the summary and searches candidate
+  items once; prices can move before you buy. Items with no cached vendor sell
+  price are skipped. Non-commodity deals require the native Buyout click.
 - **Estimated sales per day is not available.** Auctionator's public API
   exposes prices, not auction quantity or sale history. The panel shows `—`
   for that row rather than inventing a number.
@@ -139,6 +167,7 @@ recipes are captured.
 | `/om status` | Show source, recipe counts and settings |
 | `/om options` | Open the settings panel |
 | `/om buy` | Open the Buy Orders tab in the Auction House |
+| `/om vendor` | Open the Vendor Flip tab in the Auction House |
 | `/om sort` | Toggle sort by profit |
 | `/om tag profit\|margin\|both` | Choose the recipe tag |
 | `/om net ah\|vendor` | Choose Auction House or vendor net |
