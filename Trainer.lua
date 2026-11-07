@@ -197,14 +197,13 @@ function ns.ShowTrainerTooltip(button)
 
 	tooltip:AddLine(" ")
 	tooltip:AddLine("OpenMargin", 0.2, 1, 0.6)
-	tooltip:AddDoubleLine("Craft cost", econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial", 0.8, 0.8, 0.8, 1, 1, 1)
-	tooltip:AddDoubleLine("AH sell", econ.sale and ns.FormatMoneyFull(econ.sale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	tooltip:AddDoubleLine("AH net", econ.net and ns.FormatMoney(econ.net, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	tooltip:AddDoubleLine("Vendor sell", econ.vendorSale and ns.FormatMoneyFull(econ.vendorSale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	tooltip:AddDoubleLine("Vendor net (vendor mats)", econ.vendorNet and ns.FormatMoney(econ.vendorNet, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	local fullText = econ.vendorNetFull and ns.FormatMoney(econ.vendorNetFull, true)
-		or (econ.vendorSale and not econ.costComplete and "partial" or "—")
-	tooltip:AddDoubleLine("Vendor after full cost", fullText, 0.8, 0.8, 0.8, 1, 1, 1)
+	if ns.AddEconomicsTooltip then
+		ns.AddEconomicsTooltip(tooltip, econ, ns.db and ns.db.settings)
+	else
+		tooltip:AddDoubleLine("Cost to craft", econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial", 0.8, 0.8, 0.8, 1, 1, 1)
+		tooltip:AddDoubleLine("AH sell", econ.sale and ns.FormatMoneyFull(econ.sale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+		tooltip:AddDoubleLine("Vendor sell", econ.vendorSale and ns.FormatMoneyFull(econ.vendorSale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+	end
 
 	if button.OpenMarginTrainingCost then
 		tooltip:AddDoubleLine("Training cost", ns.FormatMoneyFull(button.OpenMarginTrainingCost), 0.8, 0.8, 0.8, 1, 1, 1)

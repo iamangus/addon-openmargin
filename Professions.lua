@@ -490,6 +490,7 @@ function ns.UpdateBreakdownPanel(form)
 	end
 
 	if not econ then
+		if panel.rows.cost.left then panel.rows.cost.left:SetText("Craft cost") end
 		setRowValue(panel.rows.cost, "no recipe data")
 		setRowValue(panel.rows.sale, "—")
 		setRowValue(panel.rows.vendor, "—")
@@ -505,6 +506,13 @@ function ns.UpdateBreakdownPanel(form)
 		setRowValue(panel.rows.cost, ns.FormatMoneyFull(econ.cost))
 	else
 		setRowValue(panel.rows.cost, "partial")
+	end
+
+	if panel.rows.cost.left then
+		local ahText = econ.costAH and ns.FormatMoney(econ.costAH) or "—"
+		if not econ.costComplete then ahText = "partial" end
+		local vendorText = econ.costVendor and ns.FormatMoney(econ.costVendor) or "—"
+		panel.rows.cost.left:SetText(string.format("Craft cost (AH %s + Vendor %s)", ahText, vendorText))
 	end
 
 	if econ.sale then
@@ -577,14 +585,10 @@ function ns.ShowBreakdownTooltip(panel)
 	end
 
 	tooltip:AddLine(" ")
-	tooltip:AddDoubleLine("Craft cost", econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial", 0.8, 0.8, 0.8, 1, 1, 1)
-	tooltip:AddDoubleLine("Sale price", econ.sale and ns.FormatMoneyFull(econ.sale) or "no price", 0.8, 0.8, 0.8, 1, 1, 1)
+	if ns.AddEconomicsTooltip then
+		ns.AddEconomicsTooltip(tooltip, econ, ns.db and ns.db.settings)
+	end
 	tooltip:AddDoubleLine("AH cut", econ.ahCut and ("-" .. ns.FormatMoneyFull(econ.ahCut)) or "—", 0.8, 0.8, 0.8, 1, 0.5, 0.5)
-	tooltip:AddDoubleLine("Net profit", econ.net and ns.FormatMoney(econ.net, true) or "—", 0.8, 0.8, 0.8, econ.net and econ.net > 0 and 0.25 or 1, econ.net and econ.net > 0 and 1 or 0.3, econ.net and econ.net > 0 and 0.25 or 0.3)
-	tooltip:AddDoubleLine("Vendor net (vendor mats)", econ.vendorNet and ns.FormatMoney(econ.vendorNet, true) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
-	local fullText = econ.vendorNetFull and ns.FormatMoney(econ.vendorNetFull, true)
-		or (econ.vendorSale and not econ.costComplete and "partial" or "—")
-	tooltip:AddDoubleLine("Vendor after full cost", fullText, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
 	if econ.marginCost then
 		tooltip:AddDoubleLine("Margin (cost basis)", ns.FormatPercent(econ.marginCost, true), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
 	end

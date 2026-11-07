@@ -246,16 +246,25 @@ function ns.GetEconomics(recipeID, ctx)
 	local vendorMarginSale = (vendorSale and vendorSale > 0 and vendorNet) and (vendorNet / vendorSale) or nil
 	local vendorMarginCost = (vendorCost > 0 and vendorNet) and (vendorNet / vendorCost) or nil
 
+	-- Split the full craft cost into the vendor-bought half and everything else
+	-- (Auction House, crafted intermediates, gathered materials).
+	local costAH = costInfo and costInfo.cost and (costInfo.cost - vendorCost) or nil
+	if costAH and costAH < 0 then costAH = 0 end
+
 	-- The original addon's vendor figure uses the same full craft cost as the
 	-- AH calculation. We keep it available for the tooltip, but the tag/panel
 	-- use the explicitly requested scan-free vendor flip.
 	local vendorNetFull = (vendorSale and costInfo and costInfo.complete) and (vendorSale - costInfo.cost) or nil
+	local vendorFullMarginSale = (vendorSale and vendorSale > 0 and vendorNetFull) and (vendorNetFull / vendorSale) or nil
+	local vendorFullMarginCost = (costInfo and costInfo.cost and costInfo.cost > 0 and vendorNetFull) and (vendorNetFull / costInfo.cost) or nil
 
 	return {
 		recipeID = recipeID,
 		recipe = recipe,
 		cost = costInfo and costInfo.cost,
 		costComplete = costInfo and costInfo.complete or false,
+		costAH = costAH,
+		costVendor = vendorCost,
 		details = costInfo and costInfo.details or {},
 		sale = sale,
 		saleUnit = saleUnit,
@@ -273,7 +282,60 @@ function ns.GetEconomics(recipeID, ctx)
 		vendorMargin = vendorMarginSale,
 		vendorMarginSale = vendorMarginSale,
 		vendorMarginCost = vendorMarginCost,
+		vendorFullMarginSale = vendorFullMarginSale,
+		vendorFullMarginCost = vendorFullMarginCost,
 	}
+end
+
+local function addProfitLine(tooltip, label, value, percent, partial)
+	local text
+	if value then
+		text = ns.FormatMoneyFull(value)
+		if value > 0 then
+			text = "+" .. text
+		end
+		if percent then
+			text = text .. "  (" .. ns.FormatPercent(percent, true) .. ")"
+		end
+	elseif partial then
+		text = "partial"
+	else
+		text = "—"
+	end
+
+	local r, g, b = 0.9, 0.9, 0.9
+	if value and value > 0 then
+		r, g, b = 0.25, 1, 0.25
+	elseif value and value < 0 then
+		r, g, b = 1, 0.3, 0.3
+	end
+	tooltip:AddDoubleLine(label, text, 0.75, 0.75, 0.75, r, g, b)
+end
+
+-- The standard cost/sell block used by the profession and trainer tooltips.
+-- The craft cost is split into its Auction House and vendor halves, and both
+-- sell prices are compared against the full craft cost.
+function ns.AddEconomicsTooltip(tooltip, econ, settings)
+	if not tooltip or not econ then return end
+	settings = settings or (ns.db and ns.db.settings) or {}
+
+	local costText = econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial"
+	tooltip:AddDoubleLine("Cost to craft", costText, 0.8, 0.8, 0.8, 1, 1, 1)
+
+	local ahCostText = econ.costAH
+		and (econ.costComplete and ns.FormatMoneyFull(econ.costAH) or "partial")
+		or "—"
+	local vendorCostText = econ.costVendor and ns.FormatMoneyFull(econ.costVendor) or "—"
+	tooltip:AddDoubleLine("  AH", ahCostText, 0.7, 0.7, 0.7, 0.9, 0.9, 0.9)
+	tooltip:AddDoubleLine("  Vendor", vendorCostText, 0.7, 0.7, 0.7, 0.9, 0.9, 0.9)
+
+	local ahPercent = settings.marginBasis == "cost" and econ.marginCost or econ.marginSale
+	tooltip:AddDoubleLine("AH sell", econ.sale and ns.FormatMoneyFull(econ.sale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+	addProfitLine(tooltip, "  AH profit", econ.net, ahPercent, econ.sale ~= nil and not econ.costComplete)
+
+	local vendorPercent = settings.marginBasis == "cost" and econ.vendorFullMarginCost or econ.vendorFullMarginSale
+	tooltip:AddDoubleLine("Vendor sell", econ.vendorSale and ns.FormatMoneyFull(econ.vendorSale) or "—", 0.8, 0.8, 0.8, 1, 1, 1)
+	addProfitLine(tooltip, "  Vendor profit", econ.vendorNetFull, vendorPercent, econ.vendorSale ~= nil and not econ.costComplete)
 end
 
 ns.econCache = {}
@@ -309,7 +371,12 @@ function ns.GetVendorMetric(econ, settings)
 	if not econ then return nil, nil end
 	if settings.vendorBasis == "full" then
 		local value = econ.vendorNetFull
-		local percent = (value and econ.cost and econ.cost > 0) and (value / econ.cost) or nil
+		local percent
+		if settings.marginBasis == "cost" then
+			percent = econ.vendorFullMarginCost
+		else
+			percent = econ.vendorFullMarginSale
+		end
 		return value, percent
 	end
 	return econ.vendorNet, econ.vendorMarginSale

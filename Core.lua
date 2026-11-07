@@ -6,7 +6,7 @@ ns.defaults = {
 		tag = "profit",
 		net = "ah",
 		marginBasis = "sale",
-		vendorBasis = "scanfree",
+		vendorBasis = "full",
 		sort = false,
 		craftReagents = true,
 		trainer = true,
@@ -54,8 +54,17 @@ function ns.InitDB()
 	if settings.marginBasis ~= "sale" and settings.marginBasis ~= "cost" then
 		settings.marginBasis = "sale"
 	end
+	local schema = tonumber(ns.db.schema) or 1
+	if schema < 2 then
+		-- v0.3.8 made vendor profit use the full craft cost by default. Keep
+		-- the scan-free flip available through /om vendor scanfree.
+		if settings.vendorBasis == "scanfree" then
+			settings.vendorBasis = "full"
+		end
+		ns.db.schema = 2
+	end
 	if settings.vendorBasis ~= "scanfree" and settings.vendorBasis ~= "full" then
-		settings.vendorBasis = "scanfree"
+		settings.vendorBasis = "full"
 	end
 	settings.ahCut = ns.Clamp(tonumber(settings.ahCut) or 5, 0, 25)
 	settings.sort = settings.sort == true
