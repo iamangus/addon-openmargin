@@ -1121,7 +1121,7 @@ function ns.CreateVendorFrame(ah)
 	secure:SetFrameStrata("DIALOG")
 	secure:SetFrameLevel(100)
 	secure:SetAttribute("type", "click")
-	secure:RegisterForClicks("AnyUp", "AnyDown")
+	secure:RegisterForClicks("AnyUp")
 	secure:Hide()
 	secure:SetScript("OnMouseDown", function(_, button)
 		if button == "LeftButton" then ns.BeginVendorBuy() end

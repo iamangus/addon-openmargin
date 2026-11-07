@@ -325,6 +325,7 @@ function ns.StartSnipe()
 	if state.running then return end
 	if ns.StopVendorScan then ns.StopVendorScan() end
 	if ns.StopDisenchantScan then ns.StopDisenchantScan() end
+	if ns.buyLoopRule and ns.StopBuyLoop then ns.StopBuyLoop(ns.buyLoopRule) end
 	resetRun()
 	ns.RefreshSniperFrame()
 	ns.SnipeTick()
@@ -705,9 +706,6 @@ function ns.BeginSnipeBuy()
 		return
 	end
 	if ns.snipeSecureButton then ns.snipeSecureButton:SetText("Buying...") end
-	ns.After(0, function()
-		if state.pending == pending then ns.RefreshSniperFrame() end
-	end)
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if state.pending == pending and pending.phase == "quote" then
@@ -1052,7 +1050,7 @@ function ns.CreateSniperFrame(ah)
 	secure:SetFrameStrata("DIALOG")
 	secure:SetFrameLevel(100)
 	secure:SetAttribute("type", "click")
-	secure:RegisterForClicks("AnyUp", "AnyDown")
+	secure:RegisterForClicks("AnyUp")
 	secure:SetText("Buy")
 	secure:Hide()
 	secure:SetScript("OnMouseDown", function(_, button)

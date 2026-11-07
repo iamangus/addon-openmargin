@@ -95,9 +95,10 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 The purchase is quantity-based and always takes the cheapest units first. Only
 units at or below **Max each** are included, and the confirmed unit price and
 total are checked again; if the market moved above your limit, the purchase is
-cancelled and the loop searches again. The secure Buy button is armed as soon as
-the plan is ready, before the row redraw, and the purchase confirmation is sent
-before the UI update to reduce the race window.
+cancelled and the loop searches again. The native auction buy plan is pre-armed
+as soon as the plan is ready, before the row redraw, and the purchase
+confirmation is sent before the UI update to reduce the race window. An older
+plan is still buyable; the quote is the real price guard.
 
 Each search is still a snapshot, and Blizzard throttles queries, so this is a
 per-item search loop rather than a full-market sniper. For a multi-item watchlist,

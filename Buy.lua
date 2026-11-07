@@ -8,10 +8,9 @@ local addonName, ns = ...
 -- the search loop refreshes.
 
 local SEARCH_TIMEOUT = 4
-local PLAN_MAX_AGE = 5
-local QUOTE_TIMEOUT = 15
-local PURCHASE_TIMEOUT = 30
-local AUTO_SEARCH_DELAY = 0.6
+local QUOTE_TIMEOUT = 5
+local PURCHASE_TIMEOUT = 10
+local AUTO_SEARCH_DELAY = 0.8
 
 local SORTS = {
 	{ sortOrder = _G.Enum and _G.Enum.AuctionHouseSortOrder and _G.Enum.AuctionHouseSortOrder.Price or 0, reverseSort = false },
@@ -229,9 +228,12 @@ function ns.ArmBuyRowSecure(rule)
 	local row = state and state.row
 	local secure = row and row.secureBuyButton
 	if not secure or not state.plan or inCombat() then return end
-	local target = ns.GetNativeBuyTarget()
-	if not target then return end
-	secure:SetAttribute("clickbutton", target)
+	if not ns.IsBuyFrameShown() then return end
+	if not ns.GetNativeBuyTarget() then return end
+	local prepared = ns.PrepareNativeBuy(state.plan)
+	if not prepared then return end
+	state.armedPlan = state.plan
+	secure:SetAttribute("clickbutton", prepared)
 	secure:SetText(string.format("Buy %d", state.plan.quantity))
 	secure:Enable()
 	secure:SetAlpha(1)
@@ -257,7 +259,7 @@ function ns.ScheduleBuyLoop(rule, delay)
 	if not state.loop or ns.buyLoopRule ~= rule or ns.buyPending then return end
 	if ns.buyLoopScheduled then return end
 	ns.buyLoopScheduled = true
-	ns.After(delay or 0.8, function()
+	ns.After(delay or 1.0, function()
 		ns.buyLoopScheduled = false
 		local current = ns.GetBuyState(rule)
 		if ns.buyLoopRule == rule and current.loop and not ns.buyPending then
@@ -275,6 +277,9 @@ function ns.ToggleBuyLoop(rule, row)
 	if ns.buyLoopRule and ns.buyLoopRule ~= rule then
 		ns.StopBuyLoop(ns.buyLoopRule)
 	end
+	if ns.StopSnipe then ns.StopSnipe("Buy Orders search started") end
+	if ns.StopVendorScan then ns.StopVendorScan() end
+	if ns.StopDisenchantScan then ns.StopDisenchantScan() end
 	ns.buyLoopRule = rule
 	state.loop = true
 	if state.phase == "ready" and state.plan then
@@ -428,18 +433,6 @@ local function buildPlan(rule, force)
 	ns.ArmBuyRowSecure(rule)
 	refreshRule(rule)
 
-	-- If the loop is running and the player has not taken this plan, refresh
-	-- the search after the plan goes stale instead of leaving the row idle.
-	if state.loop and ns.buyLoopRule == rule then
-		local plan = state.plan
-		local planSeq = state.planSeq
-		ns.After(PLAN_MAX_AGE, function()
-			if ns.buyLoopRule == rule and state.loop and not ns.buyPending
-				and state.phase == "ready" and state.plan == plan and state.planSeq == planSeq then
-				ns.SearchBuyRule(rule)
-			end
-		end)
-	end
 end
 
 function ns.SearchBuyRule(rule, row)
@@ -514,6 +507,10 @@ function ns.SearchBuyRule(rule, row)
 	-- result immediately from inside SendSearchQuery.
 	state.phase = "searching"
 	state.plan = nil
+	if state.armedPlan then
+		state.armedPlan = nil
+		ns.DisableNativeBuy()
+	end
 	state.moreRequested = nil
 	state.planSeq = (state.planSeq or 0) + 1
 	state.searchSeq = (state.searchSeq or 0) + 1
@@ -642,39 +639,10 @@ function ns.StartBuy(rule)
 	if not plan or state.phase ~= "ready" then return end
 	if ns.buyPending then return end
 
-	-- Make sure a stale native buy button can never be clicked by the secure
-	-- proxy. PrepareNativeBuy re-arms it only for a valid plan.
-	ns.DisableNativeBuy()
-
 	local remaining = ns.GetBuyRemaining(rule)
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
 		log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
 	end
-	if (GetTime() - plan.at) > PLAN_MAX_AGE then
-		state.phase = "idle"
-		state.plan = nil
-		state.status = "Quote is stale - searching again"
-		refreshRule(rule)
-		ns.SearchBuyRule(rule)
-		return
-	end
-	if plan.cost > remaining then
-		state.phase = "idle"
-		state.status = "Budget is too low - search again"
-		refreshRule(rule)
-		return
-	end
-	local money = ns.GetBuyMoney()
-	if money and plan.cost > money then
-		state.phase = "idle"
-		state.status = "Not enough money"
-		refreshRule(rule)
-		return
-	end
-
-	-- This only stages the native Buy button with our item/quantity/price.
-	-- The secure proxy button clicks the native Buy button, which calls
-	-- StartCommoditiesPurchase from secure code.
 	local pending = {
 		rule = rule,
 		plan = plan,
@@ -686,30 +654,26 @@ function ns.StartBuy(rule)
 	state.phase = "quoting"
 	state.status = "Checking price..."
 
-	local target = ns.PrepareNativeBuy(plan)
+	local target
+	if state.armedPlan == plan and ns.GetNativeBuyTarget() then
+		target = ns.GetNativeBuyTarget()
+	else
+		target = ns.PrepareNativeBuy(plan)
+	end
 	if not target then
+		ns.DisableNativeBuy()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.status = "Native auction buy button unavailable"
 		refreshRule(rule)
 		return
 	end
+	state.armedPlan = nil
 
 	-- Do not hide the secure button here: it was just pressed and its OnClick
 	-- still has to run. Refresh on the next frame, after the click.
 	local row = state.row
 	if row and row.secureBuyButton then row.secureBuyButton:SetText("Buying...") end
-	ns.After(0, function()
-		if ns.buyPending == pending then
-			local currentRow = state.row
-			if currentRow and currentRow.secureBuyButton then
-				currentRow.secureBuyButton:SetAttribute("clickbutton", nil)
-				currentRow.secureBuyButton:SetText("Buying...")
-				currentRow.secureBuyButton:Disable()
-				currentRow.secureBuyButton:SetAlpha(0.5)
-			end
-		end
-	end)
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
 		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
 	end
@@ -787,9 +751,10 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	local remaining = ns.GetBuyRemaining(rule)
 	local money = ns.GetBuyMoney()
 
+	-- plan.cost is only the preview. The live quote is allowed to spend more
+	-- than the preview as long as it stays under Max each and the real budget.
 	local withinLimits =
 		unitPrice <= plan.maxUnit and
-		totalPrice <= plan.cost and
 		totalPrice <= remaining and
 		(not money or totalPrice <= money)
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
@@ -799,9 +764,11 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	if not withinLimits then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		ns.HideBuyDialog()
+		ns.DisableNativeBuy()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.plan = nil
+		state.armedPlan = nil
 		state.status = "Price moved above your limit - click to search again"
 		refreshRule(rule)
 		ns.ScheduleBuyLoop(rule)
@@ -838,10 +805,12 @@ function ns.HandleCommodityUnavailable()
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 	end
 	ns.HideBuyDialog()
+	ns.DisableNativeBuy()
 	ns.buyPending = nil
 	local state = ns.GetBuyState(pending.rule)
 	state.phase = "idle"
 	state.plan = nil
+	state.armedPlan = nil
 	state.status = "No stock at your price - click to search again"
 	refreshRule(pending.rule)
 	ns.ScheduleBuyLoop(pending.rule)
@@ -860,6 +829,7 @@ function ns.HandlePurchaseSucceeded()
 	ns.buyPending = nil
 	state.phase = "idle"
 	state.plan = nil
+	state.armedPlan = nil
 	state.status = string.format("Bought %d for %s", quantity, ns.FormatMoneyFull(cost))
 	refreshRule(rule)
 	ns.Print(string.format("Bought %d x %s for %s.", quantity, rule.itemName or ns.GetBuyItemDisplay(rule.itemID), ns.FormatMoneyFull(cost)))
@@ -883,8 +853,10 @@ function ns.HandlePurchaseFailed()
 	local state = ns.GetBuyState(rule)
 	ns.buyPending = nil
 	ns.HideBuyDialog()
+	ns.DisableNativeBuy()
 	state.phase = "idle"
 	state.plan = nil
+	state.armedPlan = nil
 	state.status = "Purchase failed - click to try again"
 	refreshRule(rule)
 	ns.ScheduleBuyLoop(rule)
@@ -927,6 +899,8 @@ function ns.HandleAuctionError(errorCode)
 		local state = ns.GetBuyState(pending.rule)
 		state.phase = "idle"
 		state.plan = nil
+		state.armedPlan = nil
+		ns.DisableNativeBuy()
 		if errorCode == 10 then
 			state.status = "Auction house is busy - click again"
 		else
@@ -943,6 +917,8 @@ function ns.HandleAuctionError(errorCode)
 		if state.phase == "searching" then
 			state.phase = "idle"
 			state.plan = nil
+			state.armedPlan = nil
+			ns.DisableNativeBuy()
 			state.status = errorCode == 10 and "Auction house is busy - backing off" or "Search failed - retrying"
 			refreshRule(rule)
 			ns.ScheduleBuyLoop(rule, errorCode == 10 and 2 or 1)
@@ -1224,6 +1200,11 @@ function ns.DeleteBuyRule(rule)
 	local state = ns.GetBuyState(rule)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	rule.removed = true
+	if ns.buyLoopRule == rule then ns.buyLoopRule = nil end
+	if state.armedPlan then
+		state.armedPlan = nil
+		ns.DisableNativeBuy()
+	end
 	ns.buyRuntime[rule] = nil
 	local orders = ns.db.buyOrders
 	for index = #orders, 1, -1 do
@@ -1240,6 +1221,10 @@ function ns.ResetBuyBudget(rule)
 	rule.spent = 0
 	state.phase = "idle"
 	state.plan = nil
+	if state.armedPlan then
+		state.armedPlan = nil
+		ns.DisableNativeBuy()
+	end
 	state.status = "Budget reset - click to search"
 	refreshRule(rule)
 end
@@ -1313,12 +1298,6 @@ function ns.UpdateBuyRow(row)
 	if not row or not row.rule then return end
 	local rule = row.rule
 	local state = ns.GetBuyState(rule)
-	if not ns.buyPending and not inCombat() then
-		-- Keep the native buy button inert until the secure proxy click has
-		-- a valid plan armed for it.
-		ns.DisableNativeBuy()
-	end
-
 	if not row.itemBox:HasFocus() then
 		local name = rule.itemID and ns.GetBuyItemDisplay(rule.itemID) or (rule.itemName or "")
 		if row.itemBox:GetText() ~= name then row.itemBox:SetText(name) end
@@ -1353,6 +1332,10 @@ function ns.UpdateBuyRow(row)
 
 	local busyOther = ns.buyPending and ns.buyPending.rule ~= rule
 	local busySelf = ns.buyPending and ns.buyPending.rule == rule
+	if not busyOther and not busySelf and state.phase == "ready" and state.plan
+		and state.armedPlan ~= state.plan and ns.IsBuyFrameShown() then
+		ns.ArmBuyRowSecure(rule)
+	end
 	local nativeTarget = ns.GetNativeBuyTarget()
 
 	row.buyButton:Show()
@@ -1465,7 +1448,7 @@ local function createRow(parent)
 	row.secureBuyButton:SetFrameStrata("DIALOG")
 	row.secureBuyButton:SetFrameLevel(100)
 	row.secureBuyButton:SetAttribute("type", "click")
-	row.secureBuyButton:RegisterForClicks("AnyUp", "AnyDown")
+	row.secureBuyButton:RegisterForClicks("AnyUp")
 	row.secureBuyButton:SetScript("OnMouseDown", function(_, button)
 		if button == "LeftButton" then ns.BeginSecureBuy(row) end
 	end)
@@ -1630,6 +1613,9 @@ function ns.CreateBuyFrame(ah)
 	end)
 	frame:SetScript("OnHide", function()
 		ns.HideSecureBuyButtons()
+		if ns.buyLoopRule and ns.StopBuyLoop then
+			ns.StopBuyLoop(ns.buyLoopRule)
+		end
 	end)
 
 	ns.RefreshBuyFrame()
