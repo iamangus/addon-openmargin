@@ -679,23 +679,22 @@ function ns.StartBuy(rule)
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
 		log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
 	end
+	local row = state.row
 	local pending = {
 		rule = rule,
 		plan = plan,
 		phase = "quote",
 		startedAt = GetTime(),
-		secure = true,
+		secure = row and row.secureBuyButton,
 	}
 	ns.buyPending = pending
 	state.phase = "quoting"
 	state.status = "Checking price..."
 
-	local target
-	if state.armedPlan == plan and ns.armedBuyRule == rule and ns.GetNativeBuyTarget() then
-		target = ns.GetNativeBuyTarget()
-	else
-		target = ns.PrepareNativeBuy(plan)
-	end
+	-- Always re-arm on mouse-down, even if the plan was pre-armed. The AH can
+	-- invalidate the native Buy button between the pre-arm and the click.
+	local target = ns.PrepareNativeBuy(plan)
+	pending.target = target
 	if not target then
 		ns.DisableNativeBuy()
 		ns.buyPending = nil
@@ -708,8 +707,10 @@ function ns.StartBuy(rule)
 
 	-- Do not hide the secure button here: it was just pressed and its OnClick
 	-- still has to run. Refresh on the next frame, after the click.
-	local row = state.row
-	if row and row.secureBuyButton then row.secureBuyButton:SetText("Buying...") end
+	if row and row.secureBuyButton then
+		row.secureBuyButton:SetAttribute("clickbutton", target)
+		row.secureBuyButton:SetText("Buying...")
+	end
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
 		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
 	end
@@ -718,12 +719,17 @@ function ns.StartBuy(rule)
 		if ns.buyPending == pending and pending.phase == "quote" then
 			local dialogShown = _G.AuctionHouseFrame and _G.AuctionHouseFrame.BuyDialog
 				and _G.AuctionHouseFrame.BuyDialog:IsShown() or false
-			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()))
+			local target = pending.target
+			local targetEnabled = target and target.IsEnabled and target:IsEnabled() or "?"
+			local targetVisible = target and target.IsVisible and target:IsVisible() or "?"
+			local clickbutton = pending.secure and pending.secure.GetAttribute and pending.secure:GetAttribute("clickbutton") or nil
+			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s targetEnabled=%s targetVisible=%s clickbutton=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()), tostring(targetEnabled), tostring(targetVisible), tostring(clickbutton ~= nil))
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 			ns.HideBuyDialog()
 			ns.buyPending = nil
 			state.phase = "idle"
 			state.status = "No response from the auction house"
+			ns.Print("Buy Orders: the Auction House did not return a purchase quote. Run /om buylog for details.")
 			refreshRule(rule)
 			ns.ScheduleBuyLoop(rule)
 		end
@@ -809,8 +815,17 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		state.phase = "idle"
 		state.plan = nil
 		state.armedPlan = nil
-		state.messageUntil = GetTime() + 2.5
-		state.status = "Price moved above your limit - click Buy to try again"
+		state.messageUntil = GetTime() + 10
+		local reason
+		if unitPrice > plan.maxUnit then
+			reason = string.format("quote %s each is above Max each %s", ns.FormatMoneyFull(unitPrice), ns.FormatMoneyFull(plan.maxUnit))
+		elseif totalPrice > remaining then
+			reason = string.format("quote total %s exceeds budget remaining %s", ns.FormatMoneyFull(totalPrice), ns.FormatMoneyFull(remaining))
+		else
+			reason = string.format("quote total %s exceeds your money", ns.FormatMoneyFull(totalPrice))
+		end
+		state.status = reason .. " - click Buy to try again"
+		ns.Print("Buy Orders: " .. reason .. ".")
 		refreshRule(rule)
 		ns.ScheduleBuyLoop(rule)
 		return
@@ -852,8 +867,9 @@ function ns.HandleCommodityUnavailable()
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
-	state.messageUntil = GetTime() + 2.5
+	state.messageUntil = GetTime() + 10
 	state.status = "No stock at your price - lower Qty or click Buy again"
+	ns.Print("Buy Orders: no stock at or below your Max each for that quantity.")
 	refreshRule(pending.rule)
 	ns.ScheduleBuyLoop(pending.rule)
 end
@@ -901,8 +917,9 @@ function ns.HandlePurchaseFailed()
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
-	state.messageUntil = GetTime() + 2.5
+	state.messageUntil = GetTime() + 10
 	state.status = "Purchase failed - click to try again"
+	ns.Print("Buy Orders: purchase failed.")
 	refreshRule(rule)
 	ns.ScheduleBuyLoop(rule)
 end
@@ -1542,7 +1559,7 @@ local function createRow(parent)
 	row.secureBuyButton:SetFrameStrata("DIALOG")
 	row.secureBuyButton:SetFrameLevel(100)
 	row.secureBuyButton:SetAttribute("type", "click")
-	row.secureBuyButton:RegisterForClicks("AnyUp")
+	row.secureBuyButton:RegisterForClicks("AnyDown")
 	row.secureBuyButton:SetScript("OnMouseDown", function(_, button)
 		if button == "LeftButton" then ns.BeginSecureBuy(row) end
 	end)
