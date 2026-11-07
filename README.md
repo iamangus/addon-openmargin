@@ -46,8 +46,10 @@ query the Auction House themselves when you click Scan.
   vendor sale on each trainer row, and how many crafts repay the training cost.
 - Auctionator price and age on item tooltips.
 - **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
-  price and a budget, then click once to search and again to buy. The budget is
-  remaining spend and can be reset per order.
+  price, a budget and a quantity per purchase, then click **Buy**. It starts a
+  blind commodity purchase, checks the live quote against your limits, and
+  confirms only if the price is acceptable. The budget is remaining spend and
+  can be reset per order.
 - **Vendor Flip tab in the Auction House.** Scan for auctions that vendor for
   more than their buyout, ranked by percent margin, with a per-scan spending
   cap. Commodities are bought through the secure Auction House Buy button;
@@ -84,26 +86,25 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 
 1. **New order**, then shift-click an item from your bags or chat to put its
    name in the Item box.
-2. Set **Max each** (for example `13c`) and **Budget** (for example `10s`).
-   Accepted input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
-3. Click **Search**. The row starts a search loop; the button changes to
-   **Stop** while the loop is running.
-4. **Buy** stays greyed out until a plan is ready, then lights up with the
-   available quantity. Spam **Buy** to buy each new plan; the loop searches
-   again after each purchase and while no listings are available.
+2. Set **Max each** (for example `13c`), **Budget** (for example `10s`) and
+   **Qty** (how many units to request per purchase; default 20). Accepted money
+   input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
+3. Click **Buy**. There is no search step: OpenMargin starts a commodity
+   purchase for that quantity, takes the Auction House's live quote, and
+   confirms only if the quoted unit price is at or below **Max each** and the
+   total fits the remaining budget and your money.
+4. Spam **Buy** to keep buying. The button stays armed for the next purchase;
+   when a quote is above your limit or stock is unavailable, the purchase is
+   cancelled and the row reports why.
 
-The purchase is quantity-based and always takes the cheapest units first. Only
-units at or below **Max each** are included, and the confirmed unit price and
-total are checked again; if the market moved above your limit, the purchase is
-cancelled and the loop searches again. The native auction buy plan is pre-armed
-as soon as the plan is ready, before the row redraw, and the purchase
-confirmation is sent before the UI update to reduce the race window. An older
-plan is still buyable; the quote is the real price guard.
+This is a **blind buy**: the addon does not search first. That removes a query
+round trip, but the quote is for the whole requested quantity, so a large
+**Qty** can include higher price tiers. If the quoted average is above **Max
+each**, the purchase is cancelled. Use a smaller Qty for tighter price control.
 
-Each search is still a snapshot, and Blizzard throttles queries, so this is a
-per-item search loop rather than a full-market sniper. For a multi-item watchlist,
-use the **Sniper** tab. **Remaining** is the budget minus what this order has
-spent; **Reset** gives it a fresh budget.
+One secure click is still required per purchase, and the AH holds one commodity
+purchase at a time. **Remaining** is the budget minus what this order has spent;
+**Reset** gives it a fresh budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
 

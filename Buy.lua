@@ -2,10 +2,10 @@ local addonName, ns = ...
 
 -- Auction House buy orders.
 --
--- WoW only allows a commodity purchase from a hardware event. Each row has two
--- controls: Search/Stop and a separate Buy button. Buy stays greyed out until a
--- plan is ready, then lights up; clicking it repeatedly buys each new plan as
--- the search loop refreshes.
+-- Rows are blind commodity purchases: item, Max each, budget and a quantity
+-- per purchase. Clicking Buy starts the native commodity purchase for that
+-- quantity without a search; the live quote is checked against Max each and
+-- the remaining budget before it is confirmed.
 
 local SEARCH_TIMEOUT = 4
 local QUOTE_TIMEOUT = 5
@@ -45,6 +45,12 @@ function ns.GetBuyRemaining(rule)
 	local remaining = limit - spent
 	if remaining < 0 then remaining = 0 end
 	return remaining
+end
+
+function ns.GetBuyQuantity(rule)
+	local quantity = math.floor(tonumber(rule and rule.buyQuantity) or 20)
+	if quantity < 1 then quantity = 1 end
+	return quantity
 end
 
 -- Plain text money for edit boxes. GetMoneyString returns coin-icon markup on
@@ -189,6 +195,8 @@ function ns.InitBuyOrders()
 			rule.maxUnit = tonumber(rule.maxUnit)
 			rule.budgetLimit = tonumber(rule.budgetLimit)
 			rule.spent = tonumber(rule.spent) or 0
+			rule.buyQuantity = math.floor(tonumber(rule.buyQuantity) or 20)
+			if rule.buyQuantity < 1 then rule.buyQuantity = 1 end
 			if rule.maxUnit and rule.maxUnit <= 0 then rule.maxUnit = nil end
 			if rule.budgetLimit and rule.budgetLimit <= 0 then rule.budgetLimit = nil end
 			if rule.itemID and not rule.itemName then
@@ -233,6 +241,7 @@ function ns.ArmBuyRowSecure(rule)
 	local prepared = ns.PrepareNativeBuy(state.plan)
 	if not prepared then return end
 	state.armedPlan = state.plan
+	ns.armedBuyRule = rule
 	secure:SetAttribute("clickbutton", prepared)
 	secure:SetText(string.format("Buy %d", state.plan.quantity))
 	secure:Enable()
@@ -240,6 +249,28 @@ function ns.ArmBuyRowSecure(rule)
 	if ns.IsBuyRowVisible(row) then
 		secure:Show()
 	end
+end
+
+function ns.ArmBlindBuy(rule, plan)
+	local state = ns.GetBuyState(rule)
+	local row = state and state.row
+	local secure = row and row.secureBuyButton
+	if not secure or not plan or inCombat() or not ns.IsBuyFrameShown() then return false end
+	local prepared = ns.PrepareNativeBuy(plan)
+	if not prepared then return false end
+	state.phase = "ready"
+	state.plan = plan
+	state.armedPlan = plan
+	ns.armedBuyRule = rule
+	state.blindKey = string.format("%s|%s|%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.maxUnit))
+	secure:SetAttribute("clickbutton", prepared)
+	secure:SetText(string.format("Buy %d", plan.quantity))
+	secure:Enable()
+	secure:SetAlpha(1)
+	if ns.IsBuyRowVisible(row) then
+		secure:Show()
+	end
+	return true
 end
 
 function ns.StopBuyLoop(rule)
@@ -614,6 +645,7 @@ function ns.DisableNativeBuy()
 		if display.SetPrice then display:SetPrice(0, 0) end
 		target:Disable()
 	end)
+	ns.armedBuyRule = nil
 end
 
 function ns.PrepareNativeBuy(plan)
@@ -655,7 +687,7 @@ function ns.StartBuy(rule)
 	state.status = "Checking price..."
 
 	local target
-	if state.armedPlan == plan and ns.GetNativeBuyTarget() then
+	if state.armedPlan == plan and ns.armedBuyRule == rule and ns.GetNativeBuyTarget() then
 		target = ns.GetNativeBuyTarget()
 	else
 		target = ns.PrepareNativeBuy(plan)
@@ -715,6 +747,10 @@ function ns.BeginSecureBuy(row)
 		if row.secureBuyButton then row.secureBuyButton:SetAttribute("clickbutton", nil) end
 		return
 	end
+	if row.itemBox or row.quantityBox then
+		ns.CommitBuyRow(row)
+		ns.UpdateBuyRow(row)
+	end
 	local state = ns.GetBuyState(row.rule)
 	if state.phase ~= "ready" or not state.plan then return end
 	ns.StartBuy(row.rule)
@@ -769,7 +805,8 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		state.phase = "idle"
 		state.plan = nil
 		state.armedPlan = nil
-		state.status = "Price moved above your limit - click to search again"
+		state.messageUntil = GetTime() + 2.5
+		state.status = "Price moved above your limit - click Buy to try again"
 		refreshRule(rule)
 		ns.ScheduleBuyLoop(rule)
 		return
@@ -811,7 +848,8 @@ function ns.HandleCommodityUnavailable()
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
-	state.status = "No stock at your price - click to search again"
+	state.messageUntil = GetTime() + 2.5
+	state.status = "No stock at your price - lower Qty or click Buy again"
 	refreshRule(pending.rule)
 	ns.ScheduleBuyLoop(pending.rule)
 end
@@ -830,6 +868,8 @@ function ns.HandlePurchaseSucceeded()
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
+	ns.armedBuyRule = nil
+	state.messageUntil = GetTime() + 2.5
 	state.status = string.format("Bought %d for %s", quantity, ns.FormatMoneyFull(cost))
 	refreshRule(rule)
 	ns.Print(string.format("Bought %d x %s for %s.", quantity, rule.itemName or ns.GetBuyItemDisplay(rule.itemID), ns.FormatMoneyFull(cost)))
@@ -857,6 +897,7 @@ function ns.HandlePurchaseFailed()
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
+	state.messageUntil = GetTime() + 2.5
 	state.status = "Purchase failed - click to try again"
 	refreshRule(rule)
 	ns.ScheduleBuyLoop(rule)
@@ -1186,6 +1227,7 @@ function ns.AddBuyRule()
 		itemName = nil,
 		maxUnit = nil,
 		budgetLimit = nil,
+		buyQuantity = 20,
 		spent = 0,
 	}
 	ns.db.buyOrders[#ns.db.buyOrders + 1] = rule
@@ -1225,7 +1267,7 @@ function ns.ResetBuyBudget(rule)
 		state.armedPlan = nil
 		ns.DisableNativeBuy()
 	end
-	state.status = "Budget reset - click to search"
+	state.status = "Budget reset - click Buy"
 	refreshRule(rule)
 end
 
@@ -1239,7 +1281,7 @@ local function commitMoney(rule, box, field)
 		local state = ns.GetBuyState(rule)
 		state.phase = "idle"
 		state.plan = nil
-		state.status = "Click to search with the new limit"
+		state.status = "Ready to buy with the new limit"
 	end
 	if not box:HasFocus() then
 		local formatted = value and value > 0 and ns.FormatMoneyInput(value) or ""
@@ -1266,7 +1308,7 @@ function ns.CommitBuyRow(row)
 				if not row.itemBox:HasFocus() then row.itemBox:SetText(rule.itemName) end
 				state.phase = "idle"
 				state.plan = nil
-				state.status = "Click to search"
+				state.status = "Click Buy"
 			else
 				rule.itemID = nil
 				rule.itemName = text ~= "" and text or nil
@@ -1279,7 +1321,20 @@ function ns.CommitBuyRow(row)
 
 	commitMoney(rule, row.maxBox, "maxUnit")
 	commitMoney(rule, row.budgetBox, "budgetLimit")
-	log("commit done itemID=%s max=%s budget=%s spent=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(rule.spent), tostring(state.phase))
+	if row.quantityBox then
+		local quantity = math.floor(tonumber(row.quantityBox:GetText()) or 0)
+		if quantity >= 1 and quantity ~= ns.GetBuyQuantity(rule) then
+			rule.buyQuantity = quantity
+			state.plan = nil
+			state.armedPlan = nil
+			state.blindKey = nil
+			if ns.armedBuyRule == rule then ns.DisableNativeBuy() end
+		end
+		if not row.quantityBox:HasFocus() then
+			row.quantityBox:SetText(tostring(ns.GetBuyQuantity(rule)))
+		end
+	end
+	log("commit done itemID=%s max=%s budget=%s qty=%s spent=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(ns.GetBuyQuantity(rule)), tostring(rule.spent), tostring(state.phase))
 end
 
 local function setStatusColor(row, state)
@@ -1295,7 +1350,7 @@ local function setStatusColor(row, state)
 end
 
 function ns.UpdateBuyRow(row)
-	if not row or not row.rule then return end
+	if not row or not row.rule or not row.itemBox then return end
 	local rule = row.rule
 	local state = ns.GetBuyState(rule)
 	if not row.itemBox:HasFocus() then
@@ -1323,45 +1378,66 @@ function ns.UpdateBuyRow(row)
 	else
 		row.remaining:SetText("no budget")
 	end
+	if not row.quantityBox:HasFocus() then
+		local quantityText = tostring(ns.GetBuyQuantity(rule))
+		if row.quantityBox:GetText() ~= quantityText then row.quantityBox:SetText(quantityText) end
+	end
 
 	local info = rule.itemID and ns.GetItemInfo(rule.itemID) or nil
 	row.icon:SetTexture(info and info.texture or nil)
 
-	row.status:SetText(state.status or "")
-	setStatusColor(row, state)
-
 	local busyOther = ns.buyPending and ns.buyPending.rule ~= rule
 	local busySelf = ns.buyPending and ns.buyPending.rule == rule
-	if not busyOther and not busySelf and state.phase == "ready" and state.plan
-		and state.armedPlan ~= state.plan and ns.IsBuyFrameShown() then
-		ns.ArmBuyRowSecure(rule)
-	end
-	local nativeTarget = ns.GetNativeBuyTarget()
+	local secure = row.secureBuyButton
+	local quantity = ns.GetBuyQuantity(rule)
+	local valid = rule.itemID and rule.maxUnit and rule.maxUnit > 0 and quantity > 0
 
-	row.buyButton:Show()
-	if state.loop then
-		row.buyButton:SetText("Stop")
-		row.buyButton:Enable()
-	elseif state.phase == "searching" then
-		row.buyButton:SetText("Searching...")
-		row.buyButton:Disable()
-	elseif state.phase == "quoting" or state.phase == "buying" then
-		row.buyButton:SetText("Busy")
-		row.buyButton:Disable()
-	else
-		row.buyButton:SetText("Search")
-		row.buyButton:Enable()
+	if not busySelf then
+		if not valid then
+			state.phase = "idle"
+			state.plan = nil
+			state.armedPlan = nil
+			if ns.armedBuyRule == rule then ns.DisableNativeBuy() end
+			state.status = "Set item, max each and qty"
+		elseif remaining <= 0 then
+			state.phase = "idle"
+			state.plan = nil
+			state.armedPlan = nil
+			if ns.armedBuyRule == rule then ns.DisableNativeBuy() end
+			state.status = "Budget used - reset to buy again"
+		end
 	end
+
+	if not busySelf and not busyOther and valid and remaining > 0 and ns.IsBuyFrameShown() then
+		local key = string.format("%s|%s|%s", tostring(rule.itemID), tostring(quantity), tostring(rule.maxUnit))
+		if not state.plan or state.blindKey ~= key or state.armedPlan ~= state.plan then
+			ns.ArmBlindBuy(rule, {
+				itemID = rule.itemID,
+				quantity = quantity,
+				cost = quantity * rule.maxUnit,
+				maxUnit = rule.maxUnit,
+			})
+		end
+	end
+
+	if not busySelf and state.phase == "ready" and state.plan then
+		if not (state.messageUntil and GetTime() < state.messageUntil) then
+			state.status = string.format("Buy %d at <= %s each", state.plan.quantity, ns.FormatMoneyFull(state.plan.maxUnit))
+		end
+	end
+
+	row.status:SetText(state.status or "")
+	setStatusColor(row, state)
+	row.buyButton:Hide()
 
 	if not inCombat() then
-		local secure = row.secureBuyButton
 		if busySelf then
 			secure:SetAttribute("clickbutton", nil)
 			secure:SetText("Buying...")
 			secure:Disable()
 			secure:SetAlpha(0.5)
-		elseif not busyOther and state.phase == "ready" and state.plan and nativeTarget then
-			secure:SetAttribute("clickbutton", nativeTarget)
+		elseif not busyOther and state.phase == "ready" and state.plan and ns.GetNativeBuyTarget() then
+			secure:SetAttribute("clickbutton", ns.GetNativeBuyTarget())
 			secure:SetText(string.format("Buy %d", state.plan.quantity))
 			secure:Enable()
 			secure:SetAlpha(1)
@@ -1374,7 +1450,7 @@ function ns.UpdateBuyRow(row)
 		if ns.IsBuyRowVisible(row) then secure:Show() else secure:Hide() end
 	end
 
-	row.resetButton:SetEnabled(not (ns.buyPending and ns.buyPending.rule == rule))
+	row.resetButton:SetEnabled(not busySelf)
 end
 
 local function createRow(parent)
@@ -1416,14 +1492,22 @@ local function createRow(parent)
 	row.budgetBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 	row.budgetBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 
+	row.quantityBox = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+	row.quantityBox:SetSize(50, 20)
+	row.quantityBox:SetPoint("TOPLEFT", row, "TOPLEFT", 392, -7)
+	row.quantityBox:SetAutoFocus(false)
+	row.quantityBox:SetMaxLetters(7)
+	row.quantityBox:SetNumeric(true)
+	row.quantityBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	row.quantityBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 	row.remaining = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	row.remaining:SetPoint("TOPLEFT", row, "TOPLEFT", 396, -11)
-	row.remaining:SetWidth(116)
+	row.remaining:SetPoint("TOPLEFT", row, "TOPLEFT", 450, -11)
+	row.remaining:SetWidth(86)
 	row.remaining:SetJustifyH("LEFT")
 
 	row.resetButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 	row.resetButton:SetSize(48, 20)
-	row.resetButton:SetPoint("TOPLEFT", row, "TOPLEFT", 514, -7)
+	row.resetButton:SetPoint("TOPLEFT", row, "TOPLEFT", 544, -7)
 	row.resetButton:SetText("Reset")
 	row.resetButton:SetScript("OnClick", function()
 		ns.ResetBuyBudget(row.rule)
@@ -1432,10 +1516,8 @@ local function createRow(parent)
 	row.buyButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 	row.buyButton:SetSize(76, 22)
 	row.buyButton:SetPoint("TOPRIGHT", row, "TOPRIGHT", -30, -5)
-	row.buyButton:SetText("Search")
-	row.buyButton:SetScript("OnClick", function()
-		ns.ToggleBuyLoop(row.rule, row)
-	end)
+	row.buyButton:SetText("Buy")
+	row.buyButton:Hide()
 
 	-- Secure proxy for the native Buy button. Blizzard blocks
 	-- StartCommoditiesPurchase when addon code calls it, so the purchase must
@@ -1444,7 +1526,7 @@ local function createRow(parent)
 	-- not mark the Auction House frame protected.
 	row.secureBuyButton = CreateFrame("Button", nil, _G.UIParent, "UIPanelButtonTemplate, SecureActionButtonTemplate")
 	row.secureBuyButton:SetSize(76, 22)
-	row.secureBuyButton:SetPoint("TOPRIGHT", row, "TOPRIGHT", -30, -31)
+	row.secureBuyButton:SetPoint("TOPRIGHT", row, "TOPRIGHT", -30, -5)
 	row.secureBuyButton:SetFrameStrata("DIALOG")
 	row.secureBuyButton:SetFrameLevel(100)
 	row.secureBuyButton:SetAttribute("type", "click")
@@ -1471,12 +1553,13 @@ local function createRow(parent)
 
 	row.status = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	row.status:SetPoint("TOPLEFT", row, "TOPLEFT", 36, -32)
-	row.status:SetWidth(560)
+	row.status:SetWidth(540)
 	row.status:SetJustifyH("LEFT")
 
 	local function commit() ns.CommitBuyRow(row); ns.UpdateBuyRow(row) end
 	row.maxBox:HookScript("OnEditFocusLost", commit)
 	row.budgetBox:HookScript("OnEditFocusLost", commit)
+	row.quantityBox:HookScript("OnEditFocusLost", commit)
 
 	row.itemBox:HookScript("OnEditFocusGained", function()
 		ns.focusedBuyItemBox = row.itemBox
@@ -1499,7 +1582,7 @@ local function createRow(parent)
 					local state = ns.GetBuyState(rule)
 					state.phase = "idle"
 					state.plan = nil
-					state.status = "Click to search"
+					state.status = "Click Buy"
 					ns.UpdateBuyRow(row)
 				end
 			end
@@ -1510,7 +1593,7 @@ local function createRow(parent)
 	row.buyButton:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:AddLine("Buy Orders")
-		GameTooltip:AddLine("First click searches. When results are ready, the button shows Buy N and a second click purchases.", 1, 1, 1, true)
+		GameTooltip:AddLine("Blind buy: requests Qty units, then checks the live quote against Max each and the budget.", 1, 1, 1, true)
 		GameTooltip:AddLine("Only listings at or below Max each are bought. The confirmed price is checked again before purchase.", 0.8, 0.8, 0.8, true)
 		GameTooltip:Show()
 	end)
@@ -1521,8 +1604,8 @@ local function createRow(parent)
 	row.secureBuyButton:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:AddLine("Buy Orders")
-		GameTooltip:AddLine("This clicks the Auction House's own Buy button for the approved quantity and price.", 1, 1, 1, true)
-		GameTooltip:AddLine("Only listings at or below Max each are bought. The confirmed price is checked again before purchase.", 0.8, 0.8, 0.8, true)
+		GameTooltip:AddLine("Starts a blind purchase for Qty units. The live Auction House quote is checked against Max each and the remaining budget before confirming.", 1, 1, 1, true)
+		GameTooltip:AddLine("A larger Qty can include higher price tiers; lower it for tighter control.", 0.8, 0.8, 0.8, true)
 		GameTooltip:Show()
 	end)
 	row.secureBuyButton:SetScript("OnLeave", function()
@@ -1557,7 +1640,7 @@ function ns.CreateBuyFrame(ah)
 	hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
 	hint:SetWidth(560)
 	hint:SetJustifyH("LEFT")
-	hint:SetText("Commodities only. Shift-click an item; money like 13c, 10s or 1g 5s. First click searches, then the button becomes Buy.")
+	hint:SetText("Blind buy: shift-click an item, set Max each, Budget and Qty, then click Buy. The live quote is checked before confirming.")
 	ns.buyHint = hint
 
 	local addButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -1580,7 +1663,8 @@ function ns.CreateBuyFrame(ah)
 		{ text = "Item", x = 36, width = 188 },
 		{ text = "Max each", x = 232, width = 66 },
 		{ text = "Budget", x = 308, width = 76 },
-		{ text = "Remaining", x = 396, width = 116 },
+		{ text = "Qty", x = 392, width = 50 },
+		{ text = "Remaining", x = 450, width = 86 },
 	}
 	for index = 1, #headers do
 		local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1689,7 +1773,7 @@ function ns.InstallBuyItemHook()
 		local state = ns.GetBuyState(rule)
 		state.phase = "idle"
 		state.plan = nil
-		state.status = "Click to search"
+		state.status = "Click Buy"
 		ns.UpdateBuyRow(row)
 		return true
 	end
