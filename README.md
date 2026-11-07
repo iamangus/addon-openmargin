@@ -94,7 +94,12 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 The purchase is quantity-based and always takes the cheapest units first. Only
 units at or below **Max each** are included, and the confirmed unit price and
 total are checked again; if the market moved above your limit, the purchase is
-cancelled and the row goes back to Search. **Remaining** is the budget minus
+cancelled and the row goes back to Search. The secure Buy button is armed as
+soon as the plan is ready, before the row redraw, and the purchase confirmation
+is sent before the UI update to reduce the race window.
+
+The Buy Orders search is one-shot: each **Search** returns the listings available
+at that moment. For continuous commodity sniping, use the **Sniper** tab instead. **Remaining** is the budget minus
 what this order has spent; **Reset** gives it a fresh budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.

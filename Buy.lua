@@ -207,12 +207,35 @@ end
 
 local function refreshRule(rule)
 	if not ns.buyFrame or not ns.buyFrame:IsShown() then return end
+	if rule then
+		local state = ns.GetBuyState(rule)
+		if state and state.row then
+			ns.UpdateBuyRow(state.row)
+			return
+		end
+	end
 	local orders = ns.db and ns.db.buyOrders or {}
 	for index = 1, #orders do
 		local state = ns.buyRuntime and ns.buyRuntime[orders[index]]
 		if state and state.row then
 			ns.UpdateBuyRow(state.row)
 		end
+	end
+end
+
+-- Light the secure Buy button immediately after a plan is ready, before the
+-- rest of the row redraw. The click still goes through the native button.
+function ns.ArmBuyRowSecure(rule)
+	local state = rule and ns.GetBuyState(rule)
+	local row = state and state.row
+	local secure = row and row.secureBuyButton
+	if not secure or not state.plan or inCombat() then return end
+	local target = ns.GetNativeBuyTarget()
+	if not target then return end
+	secure:SetAttribute("clickbutton", target)
+	secure:SetText(string.format("Buy %d", state.plan.quantity))
+	if ns.IsBuyRowVisible(row) then
+		secure:Show()
 	end
 end
 
@@ -268,6 +291,7 @@ local function buildPlan(rule, force)
 	end
 
 	local tiers = {}
+	local debug = ns.IsBuyLogEnabled and ns.IsBuyLogEnabled()
 	for index = 1, num do
 		local infoOk, info = pcall(api.GetCommoditySearchResultInfo, itemID, index)
 		if infoOk and type(info) == "table" then
@@ -276,7 +300,9 @@ local function buildPlan(rule, force)
 			local own = info.numOwnerItems or 0
 			if isNumber(unitPrice) and unitPrice > 0 and isNumber(quantity) then
 				local available = quantity - (isNumber(own) and own or 0)
-				log("plan tier itemID=%s index=%s price=%s qty=%s own=%s available=%s", tostring(itemID), tostring(index), tostring(unitPrice), tostring(quantity), tostring(own), tostring(available))
+				if debug then
+					log("plan tier itemID=%s index=%s price=%s qty=%s own=%s available=%s", tostring(itemID), tostring(index), tostring(unitPrice), tostring(quantity), tostring(own), tostring(available))
+				end
 				if available > 0 then
 					tiers[#tiers + 1] = {
 						unitPrice = unitPrice,
@@ -351,6 +377,7 @@ local function buildPlan(rule, force)
 	else
 		state.status = string.format("%d units - %s total - <= %s each", quantity, ns.FormatMoneyFull(cost), ns.FormatMoneyFull(rule.maxUnit))
 	end
+	ns.ArmBuyRowSecure(rule)
 	refreshRule(rule)
 end
 
@@ -362,7 +389,10 @@ function ns.SearchBuyRule(rule, row)
 	if state.phase == "searching" or state.phase == "quoting" or state.phase == "buying" then
 		return
 	end
-	log("search request itemID=%s max=%s budget=%s spent=%s remaining=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(rule.spent), tostring(ns.GetBuyRemaining(rule)), tostring(state.phase))
+	local uiRow = row or state.row
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("search request itemID=%s max=%s budget=%s spent=%s remaining=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(rule.spent), tostring(ns.GetBuyRemaining(rule)), tostring(state.phase))
+	end
 	if not ns.IsAuctionHouseOpen() then
 		state.phase = "idle"
 		state.plan = nil
@@ -428,10 +458,15 @@ function ns.SearchBuyRule(rule, row)
 	state.searchSeq = (state.searchSeq or 0) + 1
 	state.status = "Searching..."
 	local seq = state.searchSeq
-	refreshRule(rule)
+	if uiRow and uiRow.buyButton then
+		uiRow.buyButton:SetText("Searching...")
+		uiRow.buyButton:Disable()
+	end
 
 	local sent = pcall(_G.C_AuctionHouse.SendSearchQuery, itemKey, SORTS, false)
-	log("search sent itemID=%s ok=%s", tostring(rule.itemID), tostring(sent))
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("search sent itemID=%s ok=%s", tostring(rule.itemID), tostring(sent))
+	end
 	if not sent then
 		state.phase = "idle"
 		state.status = "Search failed"
@@ -549,7 +584,9 @@ function ns.StartBuy(rule)
 	ns.DisableNativeBuy()
 
 	local remaining = ns.GetBuyRemaining(rule)
-	log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
+	end
 	if (GetTime() - plan.at) > PLAN_MAX_AGE then
 		state.phase = "idle"
 		state.plan = nil
@@ -599,7 +636,9 @@ function ns.StartBuy(rule)
 	-- still has to run. Refresh on the next frame, after the click.
 	local row = state.row
 	if row and row.secureBuyButton then row.secureBuyButton:SetText("Buying...") end
-	log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
+	end
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if ns.buyPending == pending and pending.phase == "quote" then
@@ -677,7 +716,9 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		totalPrice <= plan.cost and
 		totalPrice <= remaining and
 		(not money or totalPrice <= money)
-	log("quote unit=%s total=%s max=%s planCost=%s remaining=%s money=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(money), tostring(withinLimits))
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("quote unit=%s total=%s max=%s planCost=%s remaining=%s money=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(money), tostring(withinLimits))
+	end
 
 	if not withinLimits then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -695,20 +736,20 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	pending.unitPrice = unitPrice
 	state.phase = "buying"
 	state.status = "Buying..."
-	refreshRule(rule)
 
-	-- Confirm directly from the quote event. If the client delivers the event
-	-- synchronously this still runs inside the click's hardware event.
+	-- Confirm before touching the row UI: this is the race-winning call.
 	local confirmed, confirmError = pcall(_G.C_AuctionHouse.ConfirmCommoditiesPurchase, plan.itemID, plan.quantity)
-	log("confirm sent ok=%s err=%s", tostring(confirmed), tostring(confirmError))
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("confirm sent ok=%s err=%s", tostring(confirmed), tostring(confirmError))
+	end
 	if not confirmed then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		ns.HideBuyDialog()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.status = "Purchase could not be confirmed"
-		refreshRule(rule)
 	end
+	refreshRule(rule)
 end
 
 function ns.HandleCommodityUnavailable()

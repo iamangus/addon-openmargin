@@ -101,6 +101,7 @@ function ns.AddSnipeItem(itemID)
 	local list = ns.GetSnipeWatchlist()
 	if containsItem(list, itemID) then return false end
 	list[#list + 1] = itemID
+	if ns.snipe then ns.snipe.watchlistDirty = true end
 	if _G.C_Item and type(_G.C_Item.RequestLoadItemDataByID) == "function" then
 		pcall(_G.C_Item.RequestLoadItemDataByID, itemID)
 	end
@@ -113,8 +114,22 @@ function ns.RemoveSnipeItem(itemID)
 	local index = containsItem(list, itemID)
 	if not index then return false end
 	table.remove(list, index)
-	if ns.snipe then ns.snipe.deals[itemID] = nil end
+	if ns.snipe then
+		ns.snipe.deals[itemID] = nil
+		ns.snipe.watchlistDirty = true
+	end
+	if ns.db and ns.db.settings and tonumber(ns.db.settings.snipeFocus) == itemID then
+		ns.db.settings.snipeFocus = 0
+	end
 	return true
+end
+
+function ns.SetSnipeFocus(itemID)
+	if not ns.db or not ns.db.settings then return end
+	itemID = tonumber(itemID) or 0
+	local current = tonumber(ns.db.settings.snipeFocus) or 0
+	ns.db.settings.snipeFocus = current == itemID and 0 or itemID
+	if ns.RefreshSniperFrame then ns.RefreshSniperFrame() end
 end
 
 local function resolveItemID(text)
@@ -145,6 +160,7 @@ function ns.AddSnipeItemFromText(text)
 		return false
 	end
 	if ns.AddSnipeItem(itemID) then
+		if ns.RefreshSniperFrame then ns.RefreshSniperFrame() end
 		ns.Print("Sniper: added " .. ns.GetItemName(itemID) .. ".")
 		return true
 	end
@@ -159,6 +175,7 @@ function ns.RemoveSnipeItemFromText(text)
 		return false
 	end
 	if ns.RemoveSnipeItem(itemID) then
+		if ns.RefreshSniperFrame then ns.RefreshSniperFrame() end
 		ns.Print("Sniper: removed " .. ns.GetItemName(itemID) .. ".")
 		return true
 	end
@@ -247,15 +264,11 @@ function ns.EvaluateSnipeItem(itemID)
 	local budget = ns.GetSnipeBudget()
 	local money = ns.GetBuyMoney() or math.huge
 	local limit = budget > 0 and math.min(budget, money) or money
-	local market = ns.GetPrice(itemID)
-	local cut = (ns.db and ns.db.settings and tonumber(ns.db.settings.ahCut) or 5) / 100
-	local resale = market and market > 0 and market * (1 - cut) or vendor
 	local deal = {
 		itemID = itemID,
 		name = ns.GetItemName(itemID),
 		vendor = vendor,
-		market = market,
-		resale = resale,
+		resale = vendor,
 		maxPrice = maxPrice,
 		unitPrice = best,
 		over = best - vendor,
@@ -269,6 +282,16 @@ function ns.EvaluateSnipeItem(itemID)
 	end
 
 	state.deals[itemID] = deal
+	-- Arm the buy button before the slower Auctionator market lookup and UI
+	-- refresh. The purchase plan only needs the listing tiers and vendor cap.
+	if ns.ArmSniperBuy then ns.ArmSniperBuy() end
+
+	local market = ns.GetPrice(itemID)
+	local cut = (ns.db and ns.db.settings and tonumber(ns.db.settings.ahCut) or 5) / 100
+	deal.market = market
+	deal.resale = market and market > 0 and market * (1 - cut) or vendor
+	buildSnipePlan(deal, limit)
+
 	if state.alerted[itemID] ~= deal.unitPrice then
 		state.alerted[itemID] = deal.unitPrice
 		playAlert()
@@ -291,6 +314,7 @@ local function resetRun()
 	state.currentItem = nil
 	state.queryAt = 0
 	state.token = (state.token or 0) + 1
+	state.tick = 0
 	state.deals = {}
 	state.alerted = {}
 	state.status = "Starting..."
@@ -351,8 +375,30 @@ function ns.SnipeTick()
 		return
 	end
 
-	state.index = (state.index or 0) % #list + 1
-	local itemID = list[state.index]
+	local settings = ns.db and ns.db.settings or {}
+	local focus = tonumber(settings.snipeFocus) or 0
+	local focusOnly = settings.snipeFocusOnly == true
+	if focus > 0 and not containsItem(list, focus) then
+		settings.snipeFocus = 0
+		focus = 0
+	end
+	if focusOnly and focus == 0 then
+		state.status = "Focus only is on but no focus item is set"
+		ns.RefreshSniperFrame()
+		return
+	end
+
+	state.tick = (state.tick or 0) + 1
+	local itemID, label
+	if focus > 0 and (focusOnly or state.tick % 2 == 1) then
+		itemID = focus
+		label = "focus"
+	else
+		state.index = (state.index or 0) % #list + 1
+		itemID = list[state.index]
+		label = string.format("%d/%d", state.index, #list)
+	end
+
 	local api = _G.C_AuctionHouse
 	if not api or type(api.SendSearchQuery) ~= "function" or type(api.MakeItemKey) ~= "function" then
 		ns.StopSnipe("Auction house search API unavailable")
@@ -369,7 +415,7 @@ function ns.SnipeTick()
 	state.currentItem = itemID
 	state.queryAt = GetTime()
 	state.lastQueryAt = state.queryAt
-	state.status = string.format("Checking %s (%d/%d)...", ns.GetItemName(itemID), state.index, #list)
+	state.status = string.format("Checking %s (%s)...", ns.GetItemName(itemID), label)
 	ns.RefreshSniperFrame()
 
 	local sent = pcall(api.SendSearchQuery, itemKey, SORTS, false)
@@ -412,6 +458,21 @@ local function topDeal()
 	return snipeDeals()[1]
 end
 
+-- Fast path: light the buy button as soon as a deal is stored, before the
+-- market-price lookup and list redraw.
+function ns.ArmSniperBuy()
+	local secure = ns.snipeSecureButton
+	if not secure or inCombat() then return end
+	local deal = topDeal()
+	if not deal then return end
+	local target = ns.GetNativeBuyTarget()
+	if not target then return end
+	secure:SetAttribute("clickbutton", target)
+	secure:Enable()
+	secure:SetAlpha(1)
+	secure:Show()
+end
+
 local function refreshWatchlist()
 	local frame = ns.snipeFrame
 	if not frame then return end
@@ -425,16 +486,23 @@ local function refreshWatchlist()
 			row:SetHeight(20)
 			row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 			row.name:SetPoint("LEFT", row, "LEFT", 4, 0)
-			row.name:SetWidth(170)
+			row.name:SetWidth(145)
 			row.name:SetJustifyH("LEFT")
 			row.remove = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 			row.remove:SetSize(18, 18)
 			row.remove:SetPoint("RIGHT", row, "RIGHT", -4, 0)
 			row.remove:SetText("X")
+			row.focus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+			row.focus:SetSize(18, 18)
+			row.focus:SetPoint("RIGHT", row.remove, "LEFT", -2, 0)
+			row.focus:SetText("F")
 			rows[index] = row
 		end
 		row.itemID = itemID
+		local focused = (tonumber(ns.db and ns.db.settings and ns.db.settings.snipeFocus) or 0) == itemID
 		row.name:SetText(ns.GetItemName(itemID))
+		row.name:SetTextColor(focused and 1 or 0.9, focused and 0.82 or 0.9, focused and 0 or 0.9)
+		row.focus:SetScript("OnClick", function() ns.SetSnipeFocus(itemID) end)
 		row.remove:SetScript("OnClick", function()
 			ns.RemoveSnipeItem(itemID)
 			refreshWatchlist()
@@ -517,7 +585,10 @@ function ns.RefreshSniperFrame()
 		ns.snipeSummary:SetText(summary)
 	end
 
-	refreshWatchlist()
+	if state.watchlistDirty then
+		state.watchlistDirty = false
+		refreshWatchlist()
+	end
 	refreshDeals()
 
 	local top = topDeal()
@@ -898,6 +969,7 @@ function ns.CreateSniperFrame(ah)
 	}
 	ns.snipe.deals = ns.snipe.deals or {}
 	ns.snipe.alerted = ns.snipe.alerted or {}
+	ns.snipe.watchlistDirty = true
 	ns.snipeRows = {}
 	ns.snipeWatchRows = {}
 
@@ -958,6 +1030,19 @@ function ns.CreateSniperFrame(ah)
 		if ns.snipe.running then ns.StopSnipe() else ns.StartSnipe() end
 	end)
 	ns.snipeStartButton = start
+
+	local focusOnly = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+	focusOnly:SetSize(20, 20)
+	focusOnly:SetPoint("LEFT", start, "RIGHT", 10, 0)
+	focusOnly:SetScript("OnClick", function()
+		ns.db.settings.snipeFocusOnly = not (ns.db.settings.snipeFocusOnly == true)
+		ns.RefreshSniperFrame()
+	end)
+	ns.snipeFocusOnlyCheck = focusOnly
+
+	local focusOnlyLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	focusOnlyLabel:SetPoint("LEFT", focusOnly, "RIGHT", 2, 0)
+	focusOnlyLabel:SetText("Focus only")
 
 	local secure = CreateFrame("Button", nil, _G.UIParent, "UIPanelButtonTemplate, SecureActionButtonTemplate")
 	secure:SetSize(100, 24)

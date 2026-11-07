@@ -19,6 +19,8 @@ ns.defaults = {
 		vendorCommoditiesOnly = true,
 		snipeOver = 5,
 		snipeBudget = 0,
+		snipeFocus = 0,
+		snipeFocusOnly = false,
 	},
 	recipes = {},
 	known = {},
@@ -82,6 +84,8 @@ function ns.InitDB()
 	settings.vendorCommoditiesOnly = settings.vendorCommoditiesOnly ~= false
 	settings.snipeOver = math.max(0, tonumber(settings.snipeOver) or 5)
 	settings.snipeBudget = math.max(0, tonumber(settings.snipeBudget) or 0)
+	settings.snipeFocus = math.max(0, tonumber(settings.snipeFocus) or 0)
+	settings.snipeFocusOnly = settings.snipeFocusOnly == true
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
