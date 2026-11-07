@@ -13,6 +13,7 @@ ns.defaults = {
 		tooltips = true,
 		panel = true,
 		ahCut = 5,
+		buyDebug = false,
 	},
 	recipes = {},
 	known = {},
@@ -60,12 +61,14 @@ function ns.InitDB()
 	settings.trainer = settings.trainer ~= false
 	settings.tooltips = settings.tooltips ~= false
 	settings.panel = settings.panel ~= false
+	settings.buyDebug = settings.buyDebug == true
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
 	if type(ns.db.meta) ~= "table" then ns.db.meta = {} end
 	if type(ns.db.buyOrders) ~= "table" then ns.db.buyOrders = {} end
 	if ns.InitBuyOrders then ns.InitBuyOrders() end
+	if ns.LoadBuyLog then ns.LoadBuyLog() end
 
 	ns.RebuildRecipeIndex()
 	if ns.SetCharacterKey then ns.SetCharacterKey() end
@@ -143,6 +146,7 @@ function ns.ResetAll()
 	ns.ensureFailed = {}
 	ns.sortContext = nil
 	if ns.ClearBuyRuntime then ns.ClearBuyRuntime() end
+	if ns.ClearBuyLog then ns.ClearBuyLog() end
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()
 	if ns.RefreshAll then ns.RefreshAll() end
@@ -171,6 +175,7 @@ function ns.GetStatusLines()
 		"Recipes stored: " .. tostring(ns.recipeCount or 0),
 		"Known for this character: " .. tostring(ns.GetKnownRecipeCount()),
 		"Buy orders: " .. tostring(ns.db and ns.db.buyOrders and #ns.db.buyOrders or 0),
+		"Buy debug: " .. ((ns.IsBuyLogEnabled and ns.IsBuyLogEnabled()) and "on" or "off"),
 		"Price cache: " .. tostring(ns.GetCacheCount()),
 		"Last profession capture: " .. captureText,
 		"Hooks: profession=" .. tostring(ns.profHooks and ns.profHooks.recipeList == true)

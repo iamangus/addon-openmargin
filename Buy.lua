@@ -19,6 +19,10 @@ local SORTS = {
 	{ sortOrder = _G.Enum and _G.Enum.AuctionHouseSortOrder and _G.Enum.AuctionHouseSortOrder.Price or 0, reverseSort = false },
 }
 
+local function log(fmt, ...)
+	if ns.BuyLog then ns.BuyLog(fmt, ...) end
+end
+
 local function isSecret(value)
 	return _G.issecretvalue and _G.issecretvalue(value) or false
 end
@@ -42,8 +46,27 @@ function ns.GetBuyRemaining(rule)
 	return remaining
 end
 
+-- Plain text money for edit boxes. GetMoneyString returns coin-icon markup on
+-- modern clients, which cannot be parsed back when the field is re-read.
+function ns.FormatMoneyInput(copper)
+	copper = tonumber(copper)
+	if not copper or copper < 0 then return "" end
+	local gold = math.floor(copper / 10000)
+	local silver = math.floor((copper % 10000) / 100)
+	local rest = copper % 100
+	local parts = {}
+	if gold > 0 then parts[#parts + 1] = gold .. "g" end
+	if silver > 0 then parts[#parts + 1] = silver .. "s" end
+	if rest > 0 or #parts == 0 then parts[#parts + 1] = rest .. "c" end
+	return table.concat(parts, " ")
+end
+
 function ns.ParseMoneyInput(text)
-	text = tostring(text or ""):lower()
+	text = tostring(text or "")
+	text = text:gsub("|T.-|t", "") -- coin/texture markup from GetMoneyString
+	text = text:gsub("|A.-|a", "") -- atlas markup from GetMoneyString
+	text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+	text = text:lower()
 	text = text:gsub("gold", "g"):gsub("silver", "s"):gsub("copper", "c")
 	text = text:gsub("cents", "c"):gsub("cent", "c")
 	text = text:gsub("%s+", "")
@@ -194,6 +217,7 @@ local function buildPlan(rule, force)
 
 	local state = ns.GetBuyState(rule)
 	if state.phase ~= "searching" then return end
+	log("plan start itemID=%s max=%s remaining=%s force=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(ns.GetBuyRemaining(rule)), tostring(force))
 
 	local itemID = rule.itemID
 	if not itemID then
@@ -228,6 +252,7 @@ local function buildPlan(rule, force)
 			state.moreRequested = true
 			pcall(api.RequestMoreCommoditySearchResults, itemID)
 		end
+		log("plan waiting for full itemID=%s hasFull=%s", tostring(itemID), tostring(hasFull))
 		state.planSeq = (state.planSeq or 0) + 1
 		local seq = state.planSeq
 		ns.After(MORE_RESULTS_TIMEOUT, function()
@@ -241,6 +266,7 @@ local function buildPlan(rule, force)
 	local num = 0
 	local ok, result = pcall(api.GetNumCommoditySearchResults, itemID)
 	if ok and isNumber(result) then num = result end
+	log("plan results itemID=%s count=%s full=%s", tostring(itemID), tostring(num), tostring(hasFull))
 
 	if num <= 0 then
 		state.phase = "idle"
@@ -259,6 +285,7 @@ local function buildPlan(rule, force)
 			local own = info.numOwnerItems or 0
 			if isNumber(unitPrice) and unitPrice > 0 and isNumber(quantity) then
 				local available = quantity - (isNumber(own) and own or 0)
+				log("plan tier itemID=%s index=%s price=%s qty=%s own=%s available=%s", tostring(itemID), tostring(index), tostring(unitPrice), tostring(quantity), tostring(own), tostring(available))
 				if available > 0 then
 					tiers[#tiers + 1] = {
 						unitPrice = unitPrice,
@@ -276,6 +303,7 @@ local function buildPlan(rule, force)
 		if tiers[index].unitPrice > rule.maxUnit then break end
 		available = available + tiers[index].quantity
 	end
+	log("plan eligible itemID=%s available=%s tiers=%s", tostring(itemID), tostring(available), tostring(#tiers))
 
 	if available <= 0 then
 		state.phase = "idle"
@@ -288,6 +316,7 @@ local function buildPlan(rule, force)
 	local spendCap = ns.GetBuyRemaining(rule)
 	local money = ns.GetBuyMoney()
 	if money and money < spendCap then spendCap = money end
+	log("plan budget itemID=%s remaining=%s money=%s spendCap=%s", tostring(itemID), tostring(ns.GetBuyRemaining(rule)), tostring(money), tostring(spendCap))
 	if spendCap <= 0 then
 		state.phase = "idle"
 		state.plan = nil
@@ -325,6 +354,7 @@ local function buildPlan(rule, force)
 		at = GetTime(),
 		budgetRemaining = ns.GetBuyRemaining(rule),
 	}
+	log("plan ready itemID=%s quantity=%s cost=%s available=%s max=%s", tostring(itemID), tostring(quantity), tostring(cost), tostring(available), tostring(rule.maxUnit))
 	if quantity < available then
 		state.status = string.format("Budget allows %d of %d units - %s total", quantity, available, ns.FormatMoneyFull(cost))
 	else
@@ -341,6 +371,7 @@ function ns.SearchBuyRule(rule, row)
 	if state.phase == "searching" or state.phase == "quoting" or state.phase == "buying" then
 		return
 	end
+	log("search request itemID=%s max=%s budget=%s spent=%s remaining=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(rule.spent), tostring(ns.GetBuyRemaining(rule)), tostring(state.phase))
 	if not ns.IsAuctionHouseOpen() then
 		state.phase = "idle"
 		state.plan = nil
@@ -409,6 +440,7 @@ function ns.SearchBuyRule(rule, row)
 	refreshRule(rule)
 
 	local sent = pcall(_G.C_AuctionHouse.SendSearchQuery, itemKey, SORTS, false)
+	log("search sent itemID=%s ok=%s", tostring(rule.itemID), tostring(sent))
 	if not sent then
 		state.phase = "idle"
 		state.status = "Search failed"
@@ -443,6 +475,7 @@ end
 
 function ns.HandleCommodityResults(itemID)
 	if not itemID then return end
+	log("ah commodity results itemID=%s", tostring(itemID))
 	local rules = findRulesForItem(itemID, "searching")
 	for index = 1, #rules do
 		buildPlan(rules[index], false)
@@ -451,6 +484,7 @@ end
 
 function ns.HandleItemResults(itemID)
 	if not itemID then return end
+	log("ah item results itemID=%s", tostring(itemID))
 	local rules = findRulesForItem(itemID, "searching")
 	for index = 1, #rules do
 		local rule = rules[index]
@@ -469,6 +503,7 @@ function ns.StartBuy(rule)
 	if ns.buyPending then return end
 
 	local remaining = ns.GetBuyRemaining(rule)
+	log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
 	if plan.cost > remaining then
 		state.phase = "idle"
 		state.status = "Budget is too low - search again"
@@ -504,6 +539,7 @@ function ns.StartBuy(rule)
 	-- This must stay in the caller's click handler: StartCommoditiesPurchase
 	-- only works during a hardware event.
 	local started = pcall(_G.C_AuctionHouse.StartCommoditiesPurchase, plan.itemID, plan.quantity)
+	log("start sent ok=%s", tostring(started))
 	if not started then
 		ns.buyPending = nil
 		state.phase = "idle"
@@ -538,6 +574,7 @@ function ns.OnBuyRowClick(rule, row)
 	if ns.buyPending then return end
 
 	local state = ns.GetBuyState(rule)
+	log("click itemID=%s phase=%s planAge=%s pending=%s", tostring(rule.itemID), tostring(state.phase), tostring(state.plan and (GetTime() - state.plan.at) or nil), tostring(ns.buyPending ~= nil))
 	if state.phase == "ready" then
 		local plan = state.plan
 		if not plan or (GetTime() - plan.at) > PLAN_MAX_AGE then
@@ -567,6 +604,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		totalPrice <= plan.cost and
 		totalPrice <= remaining and
 		(not money or totalPrice <= money)
+	log("quote unit=%s total=%s max=%s planCost=%s remaining=%s money=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(money), tostring(withinLimits))
 
 	if not withinLimits then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -603,6 +641,7 @@ end
 function ns.HandleCommodityUnavailable()
 	local pending = ns.buyPending
 	if not pending or pending.phase ~= "quote" then return end
+	log("commodity price unavailable itemID=%s", tostring(pending.rule.itemID))
 	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 	end
@@ -621,6 +660,7 @@ function ns.HandlePurchaseSucceeded()
 	local state = ns.GetBuyState(rule)
 	local cost = tonumber(pending.actualCost) or pending.plan.cost or 0
 	local quantity = pending.plan.quantity or 0
+	log("purchase succeeded itemID=%s quantity=%s cost=%s oldSpent=%s", tostring(rule.itemID), tostring(quantity), tostring(cost), tostring(rule.spent))
 
 	rule.spent = (tonumber(rule.spent) or 0) + cost
 	ns.buyPending = nil
@@ -643,6 +683,7 @@ function ns.HandlePurchaseFailed()
 	local pending = ns.buyPending
 	if not pending then return end
 	local rule = pending.rule
+	log("purchase failed itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
 	ns.buyPending = nil
 	state.phase = "idle"
@@ -652,6 +693,7 @@ function ns.HandlePurchaseFailed()
 end
 
 function ns.HandleAuctionClosed()
+	log("auction house closed")
 	local pending = ns.buyPending
 	if pending and pending.phase == "quote" then
 		if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
@@ -676,6 +718,7 @@ end
 
 function ns.HandleAuctionError(errorCode)
 	errorCode = tonumber(errorCode) or errorCode
+	log("auction error code=%s pending=%s", tostring(errorCode), tostring(ns.buyPending ~= nil))
 	local pending = ns.buyPending
 	if pending then
 		ns.buyPending = nil
@@ -705,6 +748,9 @@ function ns.HandleAuctionError(errorCode)
 end
 
 function ns.OnBuyEvent(event, ...)
+	if event ~= "GET_ITEM_INFO_RECEIVED" then
+		log("event %s", tostring(event))
+	end
 	if event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_ADDED" then
 		ns.HandleCommodityResults(...)
 	elseif event == "ITEM_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_ADDED" then
@@ -777,6 +823,7 @@ end
 
 function ns.SetupAuctionTab()
 	local ah = _G.AuctionHouseFrame
+	log("tab setup existing=%s frame=%s", tostring(ns.ahTabCreated), tostring(ns.buyFrame ~= nil))
 	if not ah then return false end
 	if not ns.buyFrame then ns.CreateBuyFrame(ah) end
 	if ns.ahTabCreated then return true end
@@ -788,11 +835,13 @@ function ns.SetupAuctionTab()
 		if ok then
 			ns.ahTabLib = lib
 			ns.ahTabCreated = true
+			log("tab created shared")
 			return true
 		end
 	end
 
 	if not ah.Tabs or #ah.Tabs == 0 then
+		log("tab creation failed: no built-in tabs")
 		return false
 	end
 
@@ -810,6 +859,7 @@ function ns.SetupAuctionTab()
 	local created, tab = pcall(CreateFrame, "Button", "OpenMarginBuyOrdersTab", root, "AuctionHouseFrameDisplayModeTabTemplate")
 	if not created or not tab then
 		root:Hide()
+		log("tab creation failed: tab template")
 		return false
 	end
 	tab:SetText("Buy Orders")
@@ -829,6 +879,7 @@ function ns.SetupAuctionTab()
 	end)
 
 	ns.ahTabCreated = true
+	log("tab created own")
 	return true
 end
 
@@ -843,6 +894,7 @@ function ns.SelectBuyTab()
 end
 
 function ns.OpenBuyOrders()
+	log("open buy orders ahOpen=%s", tostring(ns.IsAuctionHouseOpen()))
 	if not ns.IsAuctionHouseOpen() then
 		ns.Print("Open the Auction House first; Buy Orders is a tab there.")
 		return
@@ -864,6 +916,7 @@ end
 
 function ns.AddBuyRule()
 	if not ns.db then return end
+	log("add buy rule")
 	ns.db.buyOrders = ns.db.buyOrders or {}
 	local rule = {
 		itemID = nil,
@@ -880,6 +933,7 @@ end
 
 function ns.DeleteBuyRule(rule)
 	if not rule or not ns.db then return end
+	log("delete buy rule itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	rule.removed = true
@@ -893,6 +947,7 @@ end
 
 function ns.ResetBuyBudget(rule)
 	if not rule then return end
+	log("reset budget itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	rule.spent = 0
@@ -904,7 +959,9 @@ end
 
 local function commitMoney(rule, box, field)
 	if not box then return end
-	local value = ns.ParseMoneyInput(box:GetText())
+	local raw = box:GetText()
+	local value = ns.ParseMoneyInput(raw)
+	log("commit field=%s raw=%q parsed=%s old=%s focus=%s", tostring(field), tostring(raw), tostring(value), tostring(rule[field]), tostring(box:HasFocus()))
 	if value ~= rule[field] then
 		rule[field] = value
 		local state = ns.GetBuyState(rule)
@@ -913,11 +970,9 @@ local function commitMoney(rule, box, field)
 		state.status = "Click to search with the new limit"
 	end
 	if not box:HasFocus() then
-		if value and value > 0 then
-			box:SetText(ns.FormatMoneyFull(value))
-		else
-			box:SetText("")
-		end
+		local formatted = value and value > 0 and ns.FormatMoneyInput(value) or ""
+		box:SetText(formatted)
+		log("commit field=%s setText=%q", tostring(field), tostring(formatted))
 	end
 end
 
@@ -929,6 +984,7 @@ function ns.CommitBuyRow(row)
 
 	if row.itemBox then
 		local text = ns.Trim(row.itemBox:GetText())
+		log("commit item raw=%q ruleName=%q ruleID=%s focus=%s", tostring(text), tostring(rule.itemName), tostring(rule.itemID), tostring(row.itemBox:HasFocus()))
 		if text ~= (rule.itemName or "") then
 			local itemID = ns.ResolveBuyItemID(text)
 			if itemID then
@@ -951,6 +1007,7 @@ function ns.CommitBuyRow(row)
 
 	commitMoney(rule, row.maxBox, "maxUnit")
 	commitMoney(rule, row.budgetBox, "budgetLimit")
+	log("commit done itemID=%s max=%s budget=%s spent=%s phase=%s", tostring(rule.itemID), tostring(rule.maxUnit), tostring(rule.budgetLimit), tostring(rule.spent), tostring(state.phase))
 end
 
 local function setStatusColor(row, state)
@@ -975,10 +1032,18 @@ function ns.UpdateBuyRow(row)
 		if row.itemBox:GetText() ~= name then row.itemBox:SetText(name) end
 	end
 	if not row.maxBox:HasFocus() then
-		row.maxBox:SetText(rule.maxUnit and rule.maxUnit > 0 and ns.FormatMoneyFull(rule.maxUnit) or "")
+		local maxText = rule.maxUnit and rule.maxUnit > 0 and ns.FormatMoneyInput(rule.maxUnit) or ""
+		if row.maxBox:GetText() ~= maxText then
+			log("row max text=%q -> %q rule=%s", tostring(row.maxBox:GetText()), tostring(maxText), tostring(rule.maxUnit))
+		end
+		row.maxBox:SetText(maxText)
 	end
 	if not row.budgetBox:HasFocus() then
-		row.budgetBox:SetText(rule.budgetLimit and rule.budgetLimit > 0 and ns.FormatMoneyFull(rule.budgetLimit) or "")
+		local budgetText = rule.budgetLimit and rule.budgetLimit > 0 and ns.FormatMoneyInput(rule.budgetLimit) or ""
+		if row.budgetBox:GetText() ~= budgetText then
+			log("row budget text=%q -> %q rule=%s", tostring(row.budgetBox:GetText()), tostring(budgetText), tostring(rule.budgetLimit))
+		end
+		row.budgetBox:SetText(budgetText)
 	end
 
 	local remaining = ns.GetBuyRemaining(rule)
@@ -1172,6 +1237,15 @@ function ns.CreateBuyFrame(ah)
 	addButton:SetScript("OnClick", function() ns.AddBuyRule() end)
 	ns.buyAddButton = addButton
 
+	local logButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+	logButton:SetSize(54, 22)
+	logButton:SetPoint("TOPRIGHT", addButton, "TOPLEFT", -6, 0)
+	logButton:SetText("Log")
+	logButton:SetScript("OnClick", function()
+		if ns.ShowBuyLog then ns.ShowBuyLog() end
+	end)
+	ns.buyLogButton = logButton
+
 	local headers = {
 		{ text = "Item", x = 36, width = 188 },
 		{ text = "Max each", x = 232, width = 66 },
@@ -1259,6 +1333,7 @@ function ns.InstallBuyItemHook()
 		if type(link) ~= "string" then return false end
 		local itemID = ns.GetItemIDFromLink(link)
 		if not itemID then return false end
+		log("shift-click itemID=%s", tostring(itemID))
 		local box = ns.focusedBuyItemBox
 		if not box or not box:IsShown() or not box:HasFocus() then return false end
 		local row = box:GetParent()

@@ -60,6 +60,20 @@ what this order has spent; **Reset** gives it a fresh budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
 
+## Buy order diagnostics
+
+If a buy order misbehaves, turn on capture and reproduce it:
+
+1. `/om buydebug` (or tick **Capture auction responses and buy actions** in the
+   Log window).
+2. Reproduce the problem.
+3. `/om buylog` opens the log. Click **Copy**, then press Ctrl+C.
+4. The last 400 lines are also saved in `OpenMarginDB.buyDebugLog` inside
+   `WTF/.../SavedVariables/OpenMargin.lua`.
+
+The log records search events, returned price tiers, plans, purchase quotes,
+buy actions and the raw text of the item/max/budget fields.
+
 ## Why "OpenMargin"?
 
 It is a play on profit margin and open source: the addon is open, and it exposes
