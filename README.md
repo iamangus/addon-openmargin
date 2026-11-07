@@ -28,6 +28,11 @@ profession window updates automatically when the scan finishes.
 - Vendor net uses the scan-free definition: vendor sell value of the output
   minus the vendor purchase cost of vendor-bought reagents. Non-vendor reagents
   are treated as free/gathered.
+- **Vendor-bought reagent costs use real vendor buy prices**, cached per
+  character whenever a vendor is open. Blizzard only exposes the price a vendor
+  pays you, not the price a vendor charges; visit a vendor once to populate the
+  cache. Before that, a vendor-sold reagent is priced from the Auction House or
+  shown as partial.
 - Craftable reagents are priced at their own craft cost when that is cheaper
   than buying them, including cross-profession chains.
 - Profit tags at profession trainers, plus how many crafts repay the training

@@ -8,7 +8,8 @@ function ns.NewCostContext(opts)
 	opts = opts or {}
 	return {
 		price = opts.price or ns.GetPrice,
-		vendor = opts.vendor or ns.GetVendorPrice,
+		vendor = opts.vendor or ns.GetVendorBuyPrice,
+		vendorSell = opts.vendorSell or opts.vendor or ns.GetVendorSellPrice,
 		recipes = opts.recipes,
 		byOutput = opts.byOutput,
 		known = opts.known,
@@ -238,7 +239,7 @@ function ns.GetEconomics(recipeID, ctx)
 		if costInfo.cost > 0 then marginCost = net / costInfo.cost end
 	end
 
-	local vendorUnit = outputItemID and ctx.vendor and ctx.vendor(outputItemID) or nil
+	local vendorUnit = outputItemID and ctx.vendorSell and ctx.vendorSell(outputItemID) or nil
 	local vendorSale = vendorUnit and vendorUnit > 0 and vendorUnit * outputQty or nil
 	local vendorCost = ns.GetVendorCost(recipe, ctx)
 	local vendorNet = vendorSale and (vendorSale - vendorCost) or nil

@@ -169,7 +169,8 @@ function ns.GetItemName(itemID)
 	return "item:" .. tostring(itemID or "?")
 end
 
-function ns.GetVendorPrice(itemID)
+-- What a vendor pays you for the item (vendor sell value).
+function ns.GetVendorSellPrice(itemID)
 	if not itemID or (_G.issecretvalue and _G.issecretvalue(itemID)) or itemID <= 0 then return nil end
 	local info = ns.GetItemInfo(itemID)
 	local raw = info and info.sellPrice
@@ -177,6 +178,35 @@ function ns.GetVendorPrice(itemID)
 	local price = tonumber(raw)
 	if price and price > 0 then return price end
 	return nil
+end
+
+-- Backwards-compatible name: this is the vendor sell value, not the buy cost.
+function ns.GetVendorPrice(itemID)
+	return ns.GetVendorSellPrice(itemID)
+end
+
+-- What a vendor charges for the item. Blizzard does not expose this for
+-- arbitrary items; we cache it from merchant visits.
+function ns.GetVendorBuyPrice(itemID)
+	if not itemID or not ns.db or not ns.charKey then return nil end
+	local byCharacter = ns.db.vendorBuy
+	local cache = byCharacter and byCharacter[ns.charKey]
+	local price = cache and tonumber(cache[itemID])
+	if price and price > 0 then return price end
+	return nil
+end
+
+function ns.SetVendorBuyPrice(itemID, price)
+	if not itemID or not price or not ns.db or not ns.charKey then return end
+	price = tonumber(price)
+	if not price or price <= 0 then return end
+	ns.db.vendorBuy = ns.db.vendorBuy or {}
+	local cache = ns.db.vendorBuy[ns.charKey]
+	if type(cache) ~= "table" then
+		cache = {}
+		ns.db.vendorBuy[ns.charKey] = cache
+	end
+	cache[itemID] = math.floor(price + 0.5)
 end
 
 function ns.GetItemIDFromLink(link)

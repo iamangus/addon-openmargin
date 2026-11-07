@@ -20,6 +20,7 @@ ns.defaults = {
 	known = {},
 	meta = {},
 	buyOrders = {},
+	vendorBuy = {},
 }
 
 local function applyDefaults(target, source)
@@ -69,6 +70,7 @@ function ns.InitDB()
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
 	if type(ns.db.meta) ~= "table" then ns.db.meta = {} end
 	if type(ns.db.buyOrders) ~= "table" then ns.db.buyOrders = {} end
+	if type(ns.db.vendorBuy) ~= "table" then ns.db.vendorBuy = {} end
 	if ns.InitBuyOrders then ns.InitBuyOrders() end
 	if ns.LoadBuyLog then ns.LoadBuyLog() end
 
@@ -173,6 +175,11 @@ function ns.GetStatusLines()
 
 	local lastCapture = ns.db and ns.db.meta and ns.db.meta.lastCaptureAt
 	local captureText = lastCapture and (ns.FormatAge(time() - lastCapture) or "unknown") or "never"
+	local vendorBuyCount = 0
+	local vendorCache = ns.db and ns.db.vendorBuy and ns.charKey and ns.db.vendorBuy[ns.charKey]
+	if type(vendorCache) == "table" then
+		for _ in pairs(vendorCache) do vendorBuyCount = vendorBuyCount + 1 end
+	end
 	local lines = {
 		"OpenMargin version: " .. addonVersion,
 		"Build: " .. build,
@@ -184,6 +191,7 @@ function ns.GetStatusLines()
 		"Recipes stored: " .. tostring(ns.recipeCount or 0),
 		"Known for this character: " .. tostring(ns.GetKnownRecipeCount()),
 		"Buy orders: " .. tostring(ns.db and ns.db.buyOrders and #ns.db.buyOrders or 0),
+		"Vendor buy prices cached: " .. tostring(vendorBuyCount),
 		"Buy debug: " .. ((ns.IsBuyLogEnabled and ns.IsBuyLogEnabled()) and "on" or "off"),
 		"Price cache: " .. tostring(ns.GetCacheCount()),
 		"Last profession capture: " .. captureText,
