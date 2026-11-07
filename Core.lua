@@ -16,6 +16,7 @@ ns.defaults = {
 		buyDebug = false,
 		vendorCap = 0,
 		vendorOver = 0,
+		vendorCommoditiesOnly = true,
 	},
 	recipes = {},
 	known = {},
@@ -76,6 +77,7 @@ function ns.InitDB()
 	settings.buyDebug = settings.buyDebug == true
 	settings.vendorCap = math.max(0, tonumber(settings.vendorCap) or 0)
 	settings.vendorOver = math.max(0, tonumber(settings.vendorOver) or 0)
+	settings.vendorCommoditiesOnly = settings.vendorCommoditiesOnly ~= false
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end

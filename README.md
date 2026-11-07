@@ -97,29 +97,30 @@ Purchases go to your mailbox, as with a normal Auction House purchase.
 
 ## Vendor Flip
 
-The **Vendor Flip** tab (or `/om vendor`) scans the Auction House for auctions
-whose buyout is below what a vendor pays for the item.
+The **Vendor Flip** tab (or `/om vendor`) scans the Auction House for
+commodities priced at or below what a vendor pays, plus an optional tolerance.
 
 1. Set a **Spend cap** (blank = no cap). The cap resets on every new scan.
-   **Max over vendor** lets you include deals priced up to that much above the
-   vendor price per unit. Leave it blank or `0` for the original strict flip;
-   enter `5c` to list commodities within 5 copper of their vendor price.
+   **Max over vendor** lets you include units priced up to that much above the
+   vendor price. Leave it blank or `0` to include only units at or below vendor;
+   enter `5c` to include units within 5 copper above vendor.
+   **Commodities only** is on by default. Uncheck it to include non-commodity
+   auctions too.
 2. Click **Scan**. OpenMargin reads the Auction House summary, then searches
-   each item that could possibly vendor for a profit.
+   each item that could possibly qualify.
 3. Deals are ranked by **percent profit margin**. The **Over** column shows how
    far the unit price is above or below the vendor price. You do not have to
-   wait for the scan to finish: as soon as a deal is found the button is live
-   and buys the best deal found so far. The scan pauses while a purchase or
-   native Buyout is in progress and resumes after. For a commodity it buys all
-   affordable units within your over-vendor limit in one purchase. For a
-   non-commodity auction it opens the item in the native Buy tab; click the
-   listing and **Buyout** there (Blizzard requires that final click).
-4. As you spend, deals beyond the remaining cap or money are skipped. Clicking
-   the same button continues down the list.
+   wait for the scan to finish: as soon as a deal is found the button is live.
+4. Click the buy button repeatedly to work down the list and buy every eligible
+   commodity. Each click buys all affordable units of the current commodity in
+   one purchase. The scan pauses while a purchase is in progress and resumes
+   after. If you uncheck **Commodities only**, non-commodity auctions open in
+   the native Buy tab; click the listing and **Buyout** there.
+5. As you spend, deals beyond the remaining cap or money are skipped.
 
 The scan is a snapshot, not a live feed. Commodity purchases use the same
 secure Auction House Buy button as Buy Orders; the purchase quote is checked
-against the vendor value before confirming. Items with no cached vendor sell
+against your vendor limit before confirming. Items with no cached vendor sell
 price are skipped until their item data loads.
 
 ## Disenchant Flip

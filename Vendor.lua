@@ -59,6 +59,10 @@ function ns.GetVendorOver()
 	return over
 end
 
+function ns.IsVendorCommoditiesOnly()
+	return not (ns.db and ns.db.settings and ns.db.settings.vendorCommoditiesOnly == false)
+end
+
 function ns.GetVendorRemaining()
 	local money = ns.GetBuyMoney()
 	local remaining = money
@@ -81,7 +85,7 @@ function ns.ComputeCommodityDeal(deal)
 	for index = 1, #tiers do
 		local tier = tiers[index]
 		if over == 0 then
-			if tier.unitPrice >= deal.sellPrice then break end
+			if tier.unitPrice > deal.sellPrice then break end
 		elseif tier.unitPrice > limit then
 			break
 		end
@@ -98,7 +102,7 @@ function ns.ComputeCommodityDeal(deal)
 	deal.margin = cost > 0 and deal.profit / cost or nil
 	deal.maxUnit = limit
 	deal.over = over
-	return quantity > 0 and (over > 0 or deal.profit > 0)
+	return quantity > 0 and (over > 0 or deal.profit >= 0)
 end
 
 function ns.VendorDeals()
@@ -112,7 +116,7 @@ function ns.VendorDeals()
 			if ns.ComputeCommodityDeal(deal) then
 				list[#list + 1] = deal
 			end
-		elseif deal.kind == "item" then
+		elseif deal.kind == "item" and not ns.IsVendorCommoditiesOnly() then
 			local tolerance = over * (deal.count or 0)
 			local within = over > 0 and deal.buyout <= (deal.vendorValue or 0) + tolerance or (deal.profit or 0) > 0
 			if not deal.opened and within and deal.buyout <= remaining then
@@ -155,6 +159,9 @@ local function refreshVendorFrame()
 	end
 	if ns.vendorOverBox and not ns.vendorOverBox:HasFocus() then
 		ns.vendorOverBox:SetText(over > 0 and ns.FormatMoneyInput(over) or "")
+	end
+	if ns.vendorOnlyCheck then
+		ns.vendorOnlyCheck:SetChecked(ns.IsVendorCommoditiesOnly())
 	end
 
 	if vendor.status then
@@ -393,18 +400,21 @@ function ns.ProcessVendorBrowseResults(token)
 					local ok, value = pcall(api.GetItemKeyInfo, itemKey)
 					if ok then keyInfo = value end
 				end
-				vendor.candidates[#vendor.candidates + 1] = {
-					itemID = itemID,
-					itemKey = {
+				local isCommodity = keyInfo and keyInfo.isCommodity == true or false
+				if isCommodity or not ns.IsVendorCommoditiesOnly() then
+					vendor.candidates[#vendor.candidates + 1] = {
 						itemID = itemID,
-						itemLevel = tonumber(itemKey.itemLevel) or 0,
-						itemSuffix = tonumber(itemKey.itemSuffix) or 0,
-						battlePetSpeciesID = tonumber(itemKey.battlePetSpeciesID) or 0,
-					},
-					minPrice = minPrice,
-					sellPrice = sellPrice,
-					isCommodity = keyInfo and keyInfo.isCommodity == true or false,
-				}
+						itemKey = {
+							itemID = itemID,
+							itemLevel = tonumber(itemKey.itemLevel) or 0,
+							itemSuffix = tonumber(itemKey.itemSuffix) or 0,
+							battlePetSpeciesID = tonumber(itemKey.battlePetSpeciesID) or 0,
+						},
+						minPrice = minPrice,
+						sellPrice = sellPrice,
+						isCommodity = isCommodity,
+					}
+				end
 			end
 		end
 	end
@@ -461,6 +471,11 @@ function ns.RunNextVendorSearch(token)
 		vendor.status = string.format("Ready: %d affordable deals", #ns.VendorDeals())
 		log("vendor scan complete deals=%d", #ns.VendorDeals())
 		ns.RefreshVendorFrame()
+		return
+	end
+
+	if ns.IsVendorCommoditiesOnly() and not candidate.isCommodity then
+		ns.After(0.05, function() ns.RunNextVendorSearch(token) end)
 		return
 	end
 
@@ -528,7 +543,7 @@ function ns.BuildCommodityVendorDeal(candidate)
 	for index = 1, count do
 		local infoOk, info = pcall(api.GetCommoditySearchResultInfo, itemID, index)
 		if infoOk and type(info) == "table" and type(info.unitPrice) == "number" then
-			local within = over > 0 and info.unitPrice <= limit or info.unitPrice < candidate.sellPrice
+			local within = over > 0 and info.unitPrice <= limit or info.unitPrice <= candidate.sellPrice
 			if within then
 				local own = tonumber(info.numOwnerItems) or 0
 				local quantity = (tonumber(info.quantity) or 0) - own
@@ -555,6 +570,7 @@ function ns.BuildCommodityVendorDeal(candidate)
 end
 
 function ns.BuildItemVendorDeals(candidate)
+	if ns.IsVendorCommoditiesOnly() then return end
 	local api = _G.C_AuctionHouse
 	local itemKey = candidate.itemKey
 	if not itemKey then
@@ -732,7 +748,7 @@ function ns.HandleVendorPrice(unitPrice, totalPrice)
 	local deal = pending.deal
 	local remaining = ns.GetVendorRemaining()
 	local over = tonumber(plan.over) or ns.GetVendorOver()
-	local within = (over > 0 and unitPrice <= plan.maxUnit or unitPrice < deal.sellPrice)
+	local within = (over > 0 and unitPrice <= plan.maxUnit or unitPrice <= deal.sellPrice)
 		and totalPrice <= plan.cost
 		and totalPrice <= remaining
 	log("vendor quote unit=%s total=%s sell=%s limit=%s planCost=%s remaining=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(deal.sellPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(within))
@@ -1005,9 +1021,9 @@ function ns.CreateVendorFrame(ah)
 
 	local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
-	hint:SetWidth(540)
+	hint:SetWidth(600)
 	hint:SetJustifyH("LEFT")
-	hint:SetText("Finds auctions that vendor for more than their buyout. Scan, then use the same button to buy the best margin. Cap resets each scan.")
+	hint:SetText("Commodities only by default. Scan for units priced at or below vendor + max over, then click the same buy button repeatedly to buy every eligible commodity. Cap resets each scan.")
 
 	local capLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	capLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -60)
@@ -1050,6 +1066,19 @@ function ns.CreateVendorFrame(ah)
 		ns.RefreshVendorFrame()
 	end)
 	ns.vendorOverBox = overBox
+
+	local onlyCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+	onlyCheck:SetSize(20, 20)
+	onlyCheck:SetPoint("LEFT", overBox, "RIGHT", 18, 0)
+	onlyCheck:SetScript("OnClick", function()
+		ns.db.settings.vendorCommoditiesOnly = not ns.IsVendorCommoditiesOnly()
+		ns.RefreshVendorFrame()
+	end)
+	ns.vendorOnlyCheck = onlyCheck
+
+	local onlyLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	onlyLabel:SetPoint("LEFT", onlyCheck, "RIGHT", 2, 0)
+	onlyLabel:SetText("Commodities only")
 
 	local status = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	status:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -82)
