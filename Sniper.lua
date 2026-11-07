@@ -522,18 +522,27 @@ function ns.RefreshSniperFrame()
 
 	local top = topDeal()
 	local secure = ns.snipeSecureButton
-	local showSecure = false
-	if secure and not state.pending and not inCombat() and top then
-		local target = ns.GetNativeBuyTarget()
-		if target then
-			showSecure = true
-			secure:SetAttribute("clickbutton", target)
-			secure:SetText("Buy")
-			secure:Show()
+	if secure and not inCombat() then
+		secure:Show()
+		if top and not state.pending then
+			local target = ns.GetNativeBuyTarget()
+			if target then
+				secure:SetAttribute("clickbutton", target)
+				secure:Enable()
+				secure:SetAlpha(1)
+				secure:SetText("Buy")
+			else
+				secure:SetAttribute("clickbutton", nil)
+				secure:Disable()
+				secure:SetAlpha(0.5)
+				secure:SetText("Buy")
+			end
+		else
+			secure:SetAttribute("clickbutton", nil)
+			secure:Disable()
+			secure:SetAlpha(0.5)
+			secure:SetText(state.pending and "Buying..." or "Buy")
 		end
-	end
-	if not showSecure and secure and not inCombat() then
-		secure:Hide()
 	end
 end
 
@@ -696,6 +705,10 @@ end
 function ns.HandleSnipePurchaseFailed()
 	local state = ns.snipe
 	if not state.pending then return end
+	if state.pending.deal then
+		state.deals[state.pending.deal.itemID] = nil
+		state.alerted[state.pending.deal.itemID] = nil
+	end
 	state.pending = nil
 	state.status = "Purchase failed"
 	ns.RefreshSniperFrame()
@@ -706,6 +719,10 @@ function ns.HandleSnipeUnavailable()
 	if not state.pending or state.pending.phase ~= "quote" then return end
 	pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 	if ns.HideBuyDialog then ns.HideBuyDialog() end
+	if state.pending.deal then
+		state.deals[state.pending.deal.itemID] = nil
+		state.alerted[state.pending.deal.itemID] = nil
+	end
 	state.pending = nil
 	state.status = "No stock at the snipe limit"
 	ns.RefreshSniperFrame()
@@ -893,7 +910,7 @@ function ns.CreateSniperFrame(ah)
 	hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
 	hint:SetWidth(640)
 	hint:SetJustifyH("LEFT")
-	hint:SetText("Watches a short list of commodities. Max price is vendor sell + spread. Blizzard throttles queries, so keep the list short. When a deal appears, click Buy.")
+	hint:SetText("Start once, then spam Buy. Buy stays greyed out until a listing is at or below vendor sell + spread. Blizzard throttles queries, so keep the watchlist short.")
 
 	local overLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	overLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -58)

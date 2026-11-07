@@ -2,7 +2,7 @@
 ## Title: OpenMargin
 ## Notes: Recipe profit, reagent costs, vendor net, trainer value, Auction House buy orders, vendor flipping, disenchant flipping and a commodity sniper using Auctionator prices. Requires Auctionator.
 ## Author: OpenMargin
-## Version: 0.5.0
+## Version: 0.5.1
 ## SavedVariables: OpenMarginDB
 ## OptionalDeps: Auctionator
 ## X-Category: Auction/Economy

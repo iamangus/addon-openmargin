@@ -162,10 +162,11 @@ full Auction House scans.
 - The default watchlist is cloth, herbs and ore, with skinning/leather excluded.
   Add or remove items in the tab, or use `/om snipe add <item>` and
   `/om snipe remove <item>`.
-- **Start** cycles through the watchlist one item at a time. When a listing is at
-  or below the limit, it plays a sound, prints a chat line, and shows the deal.
-- Click **Buy** to buy the available units at or below the limit. The purchase
-  is re-quoted and cancelled if the price moved.
+- **Start** cycles through the watchlist one item at a time.
+- **Buy** stays visible but greyed out. When a listing is at or below the limit,
+  it lights up, plays a sound, and prints a chat line. Spam **Buy** to work
+  through every matching deal; after each purchase the next deal is armed. The
+  purchase is re-quoted and cancelled if the price moved.
 
 Blizzard limits searches to roughly 100 per minute and often spaces them out
 further. Keep the watchlist to a few items for the fastest cycle; a long list
