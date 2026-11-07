@@ -11,8 +11,7 @@ local addonName, ns = ...
 local SEARCH_TIMEOUT = 6
 local PLAN_MAX_AGE = 2
 local QUOTE_TIMEOUT = 5
-local PURCHASE_TIMEOUT = 10
-local MORE_RESULTS_TIMEOUT = 1.2
+local PURCHASE_TIMEOUT = 30
 local AUTO_SEARCH_DELAY = 0.6
 
 local SORTS = {
@@ -247,20 +246,8 @@ local function buildPlan(rule, force)
 		if ok then hasFull = full == true end
 	end
 
-	if not hasFull and not force then
-		if not state.moreRequested and type(api.RequestMoreCommoditySearchResults) == "function" then
-			state.moreRequested = true
-			pcall(api.RequestMoreCommoditySearchResults, itemID)
-		end
-		log("plan waiting for full itemID=%s hasFull=%s", tostring(itemID), tostring(hasFull))
-		state.planSeq = (state.planSeq or 0) + 1
-		local seq = state.planSeq
-		ns.After(MORE_RESULTS_TIMEOUT, function()
-			if rule.itemID == itemID and state.phase == "searching" and state.planSeq == seq then
-				buildPlan(rule, true)
-			end
-		end)
-		return
+	if not hasFull then
+		log("plan using partial results itemID=%s", tostring(itemID))
 	end
 
 	local num = 0
@@ -496,6 +483,13 @@ function ns.HandleItemResults(itemID)
 	end
 end
 
+local function hideBuyDialog()
+	local ah = _G.AuctionHouseFrame
+	if ah and ah.BuyDialog and type(ah.BuyDialog.IsShown) == "function" and ah.BuyDialog:IsShown() then
+		ah.BuyDialog:Hide()
+	end
+end
+
 function ns.StartBuy(rule)
 	local state = ns.GetBuyState(rule)
 	local plan = state.plan
@@ -537,11 +531,21 @@ function ns.StartBuy(rule)
 	refreshRule(rule)
 
 	-- This must stay in the caller's click handler: StartCommoditiesPurchase
-	-- only works during a hardware event.
-	local started = pcall(_G.C_AuctionHouse.StartCommoditiesPurchase, plan.itemID, plan.quantity)
-	log("start sent ok=%s", tostring(started))
+	-- only works during a hardware event. Prefer the Auction House's own
+	-- method: it shows the native buy dialog and supplies the unit price the
+	-- client expects with the quote.
+	local unitPrice = plan.quantity > 0 and math.floor(plan.cost / plan.quantity + 0.5) or 0
+	local ah = _G.AuctionHouseFrame
+	local started, startError
+	if ah and type(ah.StartCommoditiesPurchase) == "function" then
+		started, startError = pcall(ah.StartCommoditiesPurchase, ah, plan.itemID, plan.quantity, unitPrice, plan.cost)
+	else
+		started, startError = pcall(_G.C_AuctionHouse.StartCommoditiesPurchase, plan.itemID, plan.quantity, unitPrice)
+	end
+	log("start sent ok=%s err=%s unitPrice=%s total=%s", tostring(started), tostring(startError), tostring(unitPrice), tostring(plan.cost))
 	if not started then
 		ns.buyPending = nil
+		hideBuyDialog()
 		state.phase = "idle"
 		state.status = "The auction house blocked the purchase"
 		refreshRule(rule)
@@ -551,6 +555,7 @@ function ns.StartBuy(rule)
 	ns.After(QUOTE_TIMEOUT, function()
 		if ns.buyPending == pending and pending.phase == "quote" then
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
+			hideBuyDialog()
 			ns.buyPending = nil
 			state.phase = "idle"
 			state.status = "No response from the auction house"
@@ -560,6 +565,7 @@ function ns.StartBuy(rule)
 
 	ns.After(PURCHASE_TIMEOUT, function()
 		if ns.buyPending == pending then
+			hideBuyDialog()
 			ns.buyPending = nil
 			state.phase = "idle"
 			state.status = "Purchase result unknown"
@@ -608,6 +614,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 
 	if not withinLimits then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
+		hideBuyDialog()
 		ns.buyPending = nil
 		state.phase = "idle"
 		state.plan = nil
@@ -623,19 +630,18 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	state.status = "Buying..."
 	refreshRule(rule)
 
-	-- Confirm on the next frame: the price event can be delivered from inside
-	-- StartCommoditiesPurchase, and confirming from a timer is allowed.
-	ns.After(0, function()
-		if ns.buyPending ~= pending or pending.phase ~= "buy" then return end
-		local confirmed = pcall(_G.C_AuctionHouse.ConfirmCommoditiesPurchase, plan.itemID, plan.quantity)
-		if not confirmed then
-			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
-			ns.buyPending = nil
-			state.phase = "idle"
-			state.status = "Purchase could not be confirmed"
-			refreshRule(rule)
-		end
-	end)
+	-- Confirm directly from the quote event. If the client delivers the event
+	-- synchronously this still runs inside the click's hardware event.
+	local confirmed, confirmError = pcall(_G.C_AuctionHouse.ConfirmCommoditiesPurchase, plan.itemID, plan.quantity)
+	log("confirm sent ok=%s err=%s", tostring(confirmed), tostring(confirmError))
+	if not confirmed then
+		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
+		hideBuyDialog()
+		ns.buyPending = nil
+		state.phase = "idle"
+		state.status = "Purchase could not be confirmed"
+		refreshRule(rule)
+	end
 end
 
 function ns.HandleCommodityUnavailable()
@@ -645,6 +651,7 @@ function ns.HandleCommodityUnavailable()
 	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 	end
+	hideBuyDialog()
 	ns.buyPending = nil
 	local state = ns.GetBuyState(pending.rule)
 	state.phase = "idle"
@@ -686,6 +693,7 @@ function ns.HandlePurchaseFailed()
 	log("purchase failed itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
 	ns.buyPending = nil
+	hideBuyDialog()
 	state.phase = "idle"
 	state.plan = nil
 	state.status = "Purchase failed - click to try again"
@@ -699,6 +707,7 @@ function ns.HandleAuctionClosed()
 		if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		end
+		hideBuyDialog()
 		ns.buyPending = nil
 	end
 	-- An in-flight "buy" is left alone so its success event can still record
@@ -722,6 +731,7 @@ function ns.HandleAuctionError(errorCode)
 	local pending = ns.buyPending
 	if pending then
 		ns.buyPending = nil
+		hideBuyDialog()
 		local state = ns.GetBuyState(pending.rule)
 		state.phase = "idle"
 		state.plan = nil
@@ -757,6 +767,18 @@ function ns.OnBuyEvent(event, ...)
 		local itemKey = ...
 		local itemID = type(itemKey) == "table" and itemKey.itemID or nil
 		ns.HandleItemResults(itemID)
+	elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+		local blockedAddon, blockedFunction = ...
+		local stack = ""
+		if type(_G.debugstack) == "function" then
+			local ok, value = pcall(_G.debugstack, 2, 20, 20)
+			if ok and value then stack = tostring(value) end
+		end
+		log("ACTION %s addon=%s function=%s stack=%s", tostring(event), tostring(blockedAddon), tostring(blockedFunction), stack)
+		if not ns.actionBlockedReported then
+			ns.actionBlockedReported = true
+			ns.Print("An action was blocked (" .. tostring(blockedFunction or blockedAddon or "?") .. "). Run /om buylog and send the log.")
+		end
 	elseif event == "COMMODITY_PRICE_UPDATED" then
 		local unitPrice, totalPrice = ...
 		ns.HandleCommodityPrice(unitPrice, totalPrice)
@@ -1386,6 +1408,8 @@ local buyEvents = {
 	"COMMODITY_PURCHASE_SUCCEEDED",
 	"COMMODITY_PURCHASE_FAILED",
 	"AUCTION_HOUSE_SHOW_ERROR",
+	"ADDON_ACTION_BLOCKED",
+	"ADDON_ACTION_FORBIDDEN",
 	"GET_ITEM_INFO_RECEIVED",
 }
 for index = 1, #buyEvents do

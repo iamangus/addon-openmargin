@@ -72,7 +72,12 @@ If a buy order misbehaves, turn on capture and reproduce it:
    `WTF/.../SavedVariables/OpenMargin.lua`.
 
 The log records search events, returned price tiers, plans, purchase quotes,
-buy actions and the raw text of the item/max/budget fields.
+buy actions, the raw text of the item/max/budget fields, and any action-blocked
+event with its stack trace.
+
+The purchase uses the Auction House's own buy dialog and normally confirms it
+automatically. If the client blocks the automatic confirmation, the dialog
+stays open with **Buy Now**; clicking that button performs the confirmation.
 
 ## Why "OpenMargin"?
 
