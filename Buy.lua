@@ -26,6 +26,10 @@ local function isSecret(value)
 	return _G.issecretvalue and _G.issecretvalue(value) or false
 end
 
+local function inCombat()
+	return _G.InCombatLockdown and _G.InCombatLockdown() or false
+end
+
 local function isNumber(value)
 	return type(value) == "number" and not isSecret(value)
 end
@@ -498,14 +502,62 @@ local function throttleReady()
 	return nil
 end
 
+function ns.GetNativeBuyTarget()
+	local ah = _G.AuctionHouseFrame
+	local frame = ah and ah.CommoditiesBuyFrame
+	local display = type(frame) == "table" and frame.BuyDisplay or nil
+	local target = type(display) == "table" and display.BuyButton or nil
+	if display and target then return target, display end
+	return nil
+end
+
+function ns.DisableNativeBuy()
+	local target, display = ns.GetNativeBuyTarget()
+	if not target or not display then return end
+	pcall(function()
+		if display.QuantityInput then display.QuantityInput:SetQuantity(0) end
+		if display.SetPrice then display:SetPrice(0, 0) end
+		target:Disable()
+	end)
+end
+
+function ns.PrepareNativeBuy(plan)
+	local target, display = ns.GetNativeBuyTarget()
+	if not target or not display or not plan or not plan.quantity or plan.quantity <= 0 then
+		return nil
+	end
+	local unitPrice = math.floor(plan.cost / plan.quantity + 0.5)
+	local ok = pcall(function()
+		if display.SetItemIDAndPrice then display:SetItemIDAndPrice(plan.itemID, unitPrice) end
+		if display.QuantityInput then display.QuantityInput:SetQuantity(plan.quantity) end
+		if display.SetPrice then display:SetPrice(unitPrice, plan.cost) end
+		if display.UpdateBuyButton then display:UpdateBuyButton() end
+		target:Enable()
+	end)
+	if not ok then return nil end
+	return target, display
+end
+
 function ns.StartBuy(rule)
 	local state = ns.GetBuyState(rule)
 	local plan = state.plan
 	if not plan or state.phase ~= "ready" then return end
 	if ns.buyPending then return end
 
+	-- Make sure a stale native buy button can never be clicked by the secure
+	-- proxy. PrepareNativeBuy re-arms it only for a valid plan.
+	ns.DisableNativeBuy()
+
 	local remaining = ns.GetBuyRemaining(rule)
 	log("start itemID=%s quantity=%s planCost=%s remaining=%s money=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.cost), tostring(remaining), tostring(ns.GetBuyMoney()))
+	if (GetTime() - plan.at) > PLAN_MAX_AGE then
+		state.phase = "idle"
+		state.plan = nil
+		state.status = "Quote is stale - searching again"
+		refreshRule(rule)
+		ns.SearchBuyRule(rule)
+		return
+	end
 	if plan.cost > remaining then
 		state.phase = "idle"
 		state.status = "Budget is too low - search again"
@@ -520,45 +572,34 @@ function ns.StartBuy(rule)
 		return
 	end
 
-	if not _G.C_AuctionHouse or type(_G.C_AuctionHouse.StartCommoditiesPurchase) ~= "function" then
-		state.phase = "idle"
-		state.status = "Auction house API unavailable"
-		refreshRule(rule)
-		return
-	end
-
+	-- This only stages the native Buy button with our item/quantity/price.
+	-- The secure proxy button clicks the native Buy button, which calls
+	-- StartCommoditiesPurchase from secure code.
 	local pending = {
 		rule = rule,
 		plan = plan,
 		phase = "quote",
 		startedAt = GetTime(),
+		secure = true,
 	}
 	ns.buyPending = pending
 	state.phase = "quoting"
 	state.status = "Checking price..."
-	refreshRule(rule)
 
-	-- This must stay in the caller's click handler: StartCommoditiesPurchase
-	-- only works during a hardware event. Prefer the Auction House's own
-	-- method: it shows the native buy dialog and supplies the unit price the
-	-- client expects with the quote.
-	local unitPrice = plan.quantity > 0 and math.floor(plan.cost / plan.quantity + 0.5) or 0
-	local ah = _G.AuctionHouseFrame
-	local started, startError
-	if ah and type(ah.StartCommoditiesPurchase) == "function" then
-		started, startError = pcall(ah.StartCommoditiesPurchase, ah, plan.itemID, plan.quantity, unitPrice, plan.cost)
-	else
-		started, startError = pcall(_G.C_AuctionHouse.StartCommoditiesPurchase, plan.itemID, plan.quantity, unitPrice)
-	end
-	log("start sent ok=%s err=%s unitPrice=%s total=%s", tostring(started), tostring(startError), tostring(unitPrice), tostring(plan.cost))
-	if not started then
+	local target = ns.PrepareNativeBuy(plan)
+	if not target then
 		ns.buyPending = nil
-		hideBuyDialog()
 		state.phase = "idle"
-		state.status = "The auction house blocked the purchase"
+		state.status = "Native auction buy button unavailable"
 		refreshRule(rule)
 		return
 	end
+
+	-- Do not hide the secure button here: it was just pressed and its OnClick
+	-- still has to run. Refresh on the next frame, after the click.
+	local row = state.row
+	if row and row.secureBuyButton then row.secureBuyButton:SetText("Buying...") end
+	log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if ns.buyPending == pending and pending.phase == "quote" then
@@ -585,6 +626,19 @@ function ns.StartBuy(rule)
 	end)
 end
 
+function ns.BeginSecureBuy(row)
+	if not row or not row.rule then return end
+	if ns.buyPending then
+		-- A second click while a purchase is pending must not click the native
+		-- Buy button again.
+		if row.secureBuyButton then row.secureBuyButton:SetAttribute("clickbutton", nil) end
+		return
+	end
+	local state = ns.GetBuyState(row.rule)
+	if state.phase ~= "ready" or not state.plan then return end
+	ns.StartBuy(row.rule)
+end
+
 function ns.OnBuyRowClick(rule, row)
 	if not rule then return end
 	if row then ns.CommitBuyRow(row) end
@@ -593,12 +647,10 @@ function ns.OnBuyRowClick(rule, row)
 	local state = ns.GetBuyState(rule)
 	log("click itemID=%s phase=%s planAge=%s pending=%s", tostring(rule.itemID), tostring(state.phase), tostring(state.plan and (GetTime() - state.plan.at) or nil), tostring(ns.buyPending ~= nil))
 	if state.phase == "ready" then
-		local plan = state.plan
-		if not plan or (GetTime() - plan.at) > PLAN_MAX_AGE then
-			ns.SearchBuyRule(rule)
-			return
-		end
-		ns.StartBuy(rule)
+		-- Normally the secure Buy button handles this. If it is not shown,
+		-- the native Auction House buy button is unavailable.
+		state.status = "Native auction buy button unavailable"
+		refreshRule(rule)
 	elseif state.phase == "idle" then
 		ns.SearchBuyRule(rule)
 	end
@@ -713,6 +765,8 @@ end
 
 function ns.HandleAuctionClosed()
 	log("auction house closed")
+	ns.HideSecureBuyButtons()
+	if not inCombat() then ns.DisableNativeBuy() end
 	local pending = ns.buyPending
 	if pending and pending.phase == "quote" then
 		if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
@@ -820,6 +874,12 @@ function ns.OnBuyEvent(event, ...)
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		ns.InstallBuyItemHook()
 		if ns.IsAuctionHouseOpen() then ns.SetupAuctionTab() end
+	elseif event == "PLAYER_REGEN_ENABLED" then
+		if ns.secureHidePending then
+			ns.secureHidePending = false
+			ns.HideSecureBuyButtons()
+		end
+		if ns.IsBuyFrameShown() then ns.UpdateSecureButtonVisibility() end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		ns.HandleAuctionClosed()
 	elseif event == "GET_ITEM_INFO_RECEIVED" then
@@ -956,6 +1016,50 @@ function ns.IsBuyFrameShown()
 	return ns.buyFrame and ns.buyFrame:IsShown() or false
 end
 
+function ns.HideSecureBuyButtons()
+	if inCombat() then
+		ns.secureHidePending = true
+		return
+	end
+	local buttons = ns.secureBuyButtons or {}
+	for index = 1, #buttons do
+		buttons[index]:Hide()
+	end
+end
+
+function ns.IsBuyRowVisible(row)
+	local scroll = ns.buyScroll
+	if not row or not scroll then return false end
+	local top, bottom = row:GetTop(), row:GetBottom()
+	local scrollTop, scrollBottom = scroll:GetTop(), scroll:GetBottom()
+	if type(top) ~= "number" or type(bottom) ~= "number"
+		or type(scrollTop) ~= "number" or type(scrollBottom) ~= "number" then
+		return true
+	end
+	return top <= scrollTop and bottom >= scrollBottom
+end
+
+function ns.UpdateSecureButtonVisibility()
+	if inCombat() then return end
+	if not ns.buyFrame or not ns.buyFrame:IsShown() then
+		ns.HideSecureBuyButtons()
+		return
+	end
+	local rows = ns.buyRows or {}
+	for index = 1, #rows do
+		local row = rows[index]
+		local secure = row.secureBuyButton
+		if secure then
+			local rule = row.rule
+			local state = rule and ns.buyRuntime and ns.buyRuntime[rule]
+			local otherPending = ns.buyPending and ns.buyPending.rule ~= rule
+			local show = rule and state and state.phase == "ready" and state.plan
+				and not otherPending and ns.IsBuyRowVisible(row)
+			secure:SetShown(show and true or false)
+		end
+	end
+end
+
 -- ---------------------------------------------------------------------------
 -- Buy Orders UI
 -- ---------------------------------------------------------------------------
@@ -1072,6 +1176,11 @@ function ns.UpdateBuyRow(row)
 	if not row or not row.rule then return end
 	local rule = row.rule
 	local state = ns.GetBuyState(rule)
+	if not ns.buyPending and not inCombat() then
+		-- Keep the native buy button inert until the secure proxy click has
+		-- a valid plan armed for it.
+		ns.DisableNativeBuy()
+	end
 
 	if not row.itemBox:HasFocus() then
 		local name = rule.itemID and ns.GetBuyItemDisplay(rule.itemID) or (rule.itemName or "")
@@ -1106,24 +1215,40 @@ function ns.UpdateBuyRow(row)
 	setStatusColor(row, state)
 
 	local busyOther = ns.buyPending and ns.buyPending.rule ~= rule
+	local nativeTarget = ns.GetNativeBuyTarget()
 	if busyOther then
+		if not inCombat() then row.secureBuyButton:Hide() end
+		row.buyButton:Show()
 		row.buyButton:SetText("Busy")
 		row.buyButton:Disable()
-	elseif state.phase == "searching" then
-		row.buyButton:SetText("Searching...")
-		row.buyButton:Disable()
-	elseif state.phase == "quoting" then
-		row.buyButton:SetText("Checking...")
-		row.buyButton:Disable()
-	elseif state.phase == "buying" then
-		row.buyButton:SetText("Buying...")
-		row.buyButton:Disable()
-	elseif state.phase == "ready" and state.plan then
-		row.buyButton:SetText(string.format("Buy %d", state.plan.quantity))
-		row.buyButton:Enable()
+	elseif state.phase == "ready" and state.plan and nativeTarget and not inCombat() then
+		row.secureBuyButton:SetAttribute("clickbutton", nativeTarget)
+		row.secureBuyButton:SetText(string.format("Buy %d", state.plan.quantity))
+		if ns.IsBuyRowVisible(row) then
+			row.secureBuyButton:Show()
+		else
+			row.secureBuyButton:Hide()
+		end
+		row.buyButton:Hide()
 	else
-		row.buyButton:SetText("Search")
-		row.buyButton:Enable()
+		if not inCombat() then row.secureBuyButton:Hide() end
+		row.buyButton:Show()
+		if state.phase == "searching" then
+			row.buyButton:SetText("Searching...")
+			row.buyButton:Disable()
+		elseif state.phase == "quoting" then
+			row.buyButton:SetText("Checking...")
+			row.buyButton:Disable()
+		elseif state.phase == "buying" then
+			row.buyButton:SetText("Buying...")
+			row.buyButton:Disable()
+		elseif state.phase == "ready" and state.plan then
+			row.buyButton:SetText(string.format("Buy %d", state.plan.quantity))
+			row.buyButton:Enable()
+		else
+			row.buyButton:SetText("Search")
+			row.buyButton:Enable()
+		end
 	end
 
 	row.resetButton:SetEnabled(not (ns.buyPending and ns.buyPending.rule == rule))
@@ -1188,6 +1313,30 @@ local function createRow(parent)
 		ns.OnBuyRowClick(row.rule, row)
 	end)
 
+	-- Secure proxy for the native Buy button. Blizzard blocks
+	-- StartCommoditiesPurchase when addon code calls it, so the purchase must
+	-- be initiated by clicking the Auction House's own button from a secure
+	-- action button. Keep it parented to UIParent so the secure template does
+	-- not mark the Auction House frame protected.
+	row.secureBuyButton = CreateFrame("Button", nil, _G.UIParent, "UIPanelButtonTemplate, SecureActionButtonTemplate")
+	row.secureBuyButton:SetSize(96, 22)
+	row.secureBuyButton:SetPoint("TOPRIGHT", row.buyButton, "TOPRIGHT", 0, 0)
+	row.secureBuyButton:SetFrameStrata("DIALOG")
+	row.secureBuyButton:SetFrameLevel(100)
+	row.secureBuyButton:SetAttribute("type", "click")
+	row.secureBuyButton:RegisterForClicks("AnyUp", "AnyDown")
+	row.secureBuyButton:SetScript("OnMouseDown", function(_, button)
+		if button == "LeftButton" then ns.BeginSecureBuy(row) end
+	end)
+	row.secureBuyButton:HookScript("PostClick", function()
+		ns.After(0, function()
+			if row.rule then ns.UpdateBuyRow(row) end
+		end)
+	end)
+	row.secureBuyButton:Hide()
+	ns.secureBuyButtons = ns.secureBuyButtons or {}
+	ns.secureBuyButtons[#ns.secureBuyButtons + 1] = row.secureBuyButton
+
 	row.deleteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 	row.deleteButton:SetSize(20, 20)
 	row.deleteButton:SetPoint("TOPRIGHT", row, "TOPRIGHT", -6, -6)
@@ -1242,6 +1391,17 @@ local function createRow(parent)
 		GameTooltip:Show()
 	end)
 	row.buyButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	row.secureBuyButton:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:AddLine("Buy Orders")
+		GameTooltip:AddLine("This clicks the Auction House's own Buy button for the approved quantity and price.", 1, 1, 1, true)
+		GameTooltip:AddLine("Only listings at or below Max each are bought. The confirmed price is checked again before purchase.", 0.8, 0.8, 0.8, true)
+		GameTooltip:Show()
+	end)
+	row.secureBuyButton:SetScript("OnLeave", function()
 		GameTooltip:Hide()
 	end)
 
@@ -1309,6 +1469,8 @@ function ns.CreateBuyFrame(ah)
 	local scroll = CreateFrame("ScrollFrame", "OpenMarginBuyScrollFrame", frame, "UIPanelScrollFrameTemplate")
 	scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -86)
 	scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -28, 10)
+	scroll:HookScript("OnVerticalScroll", function() ns.UpdateSecureButtonVisibility() end)
+	scroll:HookScript("OnScrollRangeChanged", function() ns.UpdateSecureButtonVisibility() end)
 	ns.buyScroll = scroll
 
 	local content = CreateFrame("Frame", nil, scroll)
@@ -1324,6 +1486,9 @@ function ns.CreateBuyFrame(ah)
 	ns.buyRows = {}
 	frame:SetScript("OnShow", function()
 		ns.RefreshBuyFrame()
+	end)
+	frame:SetScript("OnHide", function()
+		ns.HideSecureBuyButtons()
 	end)
 
 	ns.RefreshBuyFrame()
@@ -1360,12 +1525,15 @@ function ns.RefreshBuyFrame()
 	end
 
 	for index = #orders + 1, #ns.buyRows do
-		ns.buyRows[index].rule = nil
-		ns.buyRows[index]:Hide()
+		local row = ns.buyRows[index]
+		row.rule = nil
+		if row.secureBuyButton then row.secureBuyButton:Hide() end
+		row:Hide()
 	end
 
 	content:SetHeight(math.max(#orders * 56, 1))
 	ns.buyEmpty:SetShown(#orders == 0)
+	ns.UpdateSecureButtonVisibility()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1423,6 +1591,7 @@ local buyEvents = {
 	"AUCTION_HOUSE_SHOW",
 	"AUCTION_HOUSE_CLOSED",
 	"PLAYER_ENTERING_WORLD",
+	"PLAYER_REGEN_ENABLED",
 	"COMMODITY_SEARCH_RESULTS_ADDED",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"ITEM_SEARCH_RESULTS_ADDED",

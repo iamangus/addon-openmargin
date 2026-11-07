@@ -2,7 +2,7 @@
 ## Title: OpenMargin
 ## Notes: Recipe profit, reagent costs, vendor net, trainer value and Auction House buy orders using Auctionator prices. Requires Auctionator.
 ## Author: OpenMargin
-## Version: 0.2.4
+## Version: 0.2.5
 ## SavedVariables: OpenMarginDB
 ## OptionalDeps: Auctionator
 ## X-Category: Auction/Economy
