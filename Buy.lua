@@ -902,21 +902,22 @@ function ns.ResetBuyBudget(rule)
 	refreshRule(rule)
 end
 
-local function commitMoney(rule, box, field, afterChange)
-	if not box or box:HasFocus() then return end
+local function commitMoney(rule, box, field)
+	if not box then return end
 	local value = ns.ParseMoneyInput(box:GetText())
 	if value ~= rule[field] then
 		rule[field] = value
-		if afterChange then afterChange() end
 		local state = ns.GetBuyState(rule)
 		state.phase = "idle"
 		state.plan = nil
 		state.status = "Click to search with the new limit"
 	end
-	if value and value > 0 then
-		box:SetText(ns.FormatMoneyFull(value))
-	else
-		box:SetText("")
+	if not box:HasFocus() then
+		if value and value > 0 then
+			box:SetText(ns.FormatMoneyFull(value))
+		else
+			box:SetText("")
+		end
 	end
 end
 
@@ -926,7 +927,7 @@ function ns.CommitBuyRow(row)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	local state = ns.GetBuyState(rule)
 
-	if row.itemBox and not row.itemBox:HasFocus() then
+	if row.itemBox then
 		local text = ns.Trim(row.itemBox:GetText())
 		if text ~= (rule.itemName or "") then
 			local itemID = ns.ResolveBuyItemID(text)
@@ -934,7 +935,7 @@ function ns.CommitBuyRow(row)
 				if itemID ~= rule.itemID then rule.spent = 0 end
 				rule.itemID = itemID
 				rule.itemName = ns.GetBuyItemDisplay(itemID)
-				row.itemBox:SetText(rule.itemName)
+				if not row.itemBox:HasFocus() then row.itemBox:SetText(rule.itemName) end
 				state.phase = "idle"
 				state.plan = nil
 				state.status = "Click to search"
