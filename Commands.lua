@@ -24,6 +24,9 @@ local function printHelp()
 		"/om buy — open the Buy Orders tab in the Auction House",
 		"/om vendor — open the Vendor Flip tab in the Auction House",
 		"/om de — open the Disenchant Flip tab in the Auction House",
+		"/om snipe — open the Sniper tab in the Auction House",
+		"/om snipe start|stop — start or stop the sniper",
+		"/om snipe add|remove <item> — edit the snipe watchlist",
 		"/om buydebug — toggle Auction House buy logging",
 		"/om buylog — show/copy the buy log",
 		"/om recapture — rebuild the open profession's recipe data",
@@ -140,6 +143,23 @@ local function handleCommand(message)
 
 	elseif command == "de" or command == "disenchant" then
 		if ns.OpenDisenchantFlip then ns.OpenDisenchantFlip() end
+
+	elseif command == "snipe" then
+		local action, arg = rest:match("^(%S*)%s*(.-)$")
+		action = (action or ""):lower()
+		if action == "" then
+			if ns.OpenSniper then ns.OpenSniper() end
+		elseif action == "start" then
+			if ns.StartSnipe then ns.StartSnipe() end
+		elseif action == "stop" then
+			if ns.StopSnipe then ns.StopSnipe() end
+		elseif action == "add" then
+			if ns.AddSnipeItemFromText then ns.AddSnipeItemFromText(arg) end
+		elseif action == "remove" or action == "rm" then
+			if ns.RemoveSnipeItemFromText then ns.RemoveSnipeItemFromText(arg) end
+		else
+			ns.Print("Usage: /om snipe [start|stop|add <item>|remove <item>]")
+		end
 
 	elseif command == "buydebug" then
 		if ns.ToggleBuyDebug then ns.ToggleBuyDebug() end

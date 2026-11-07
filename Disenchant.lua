@@ -421,6 +421,8 @@ function ns.SelectDisenchantTab()
 	for index = 1, #tabs do PanelTemplates_DeselectTab(tabs[index]) end
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end
 	if ns.vendorAhTab then PanelTemplates_DeselectTab(ns.vendorAhTab) end
+	if ns.snipeAhTab then PanelTemplates_DeselectTab(ns.snipeAhTab) end
+	if ns.snipeFrame then ns.snipeFrame:Hide() end
 	if ns.disAhTab then PanelTemplates_SelectTab(ns.disAhTab) end
 	ah:SetTitle("Disenchant Flip")
 	if ns.buyFrame then ns.buyFrame:Hide() end

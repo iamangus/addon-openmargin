@@ -683,6 +683,11 @@ function ns.BeginVendorBuy()
 		ns.RefreshVendorFrame()
 		return
 	end
+	if ns.snipe and ns.snipe.pending then
+		vendor.status = "A Sniper purchase is already in progress"
+		ns.RefreshVendorFrame()
+		return
+	end
 	ns.DisableNativeBuy()
 	local deal = topDeal()
 	if not deal or deal.kind ~= "commodity" or not ns.ComputeCommodityDeal(deal) then return end
@@ -924,6 +929,8 @@ function ns.SelectVendorTab()
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end
 	if ns.disAhTab then PanelTemplates_DeselectTab(ns.disAhTab) end
 	if ns.disFrame then ns.disFrame:Hide() end
+	if ns.snipeAhTab then PanelTemplates_DeselectTab(ns.snipeAhTab) end
+	if ns.snipeFrame then ns.snipeFrame:Hide() end
 	if ns.vendorAhTab then PanelTemplates_SelectTab(ns.vendorAhTab) end
 	ah:SetTitle("Vendor Flip")
 	if ns.buyFrame then ns.buyFrame:Hide() end

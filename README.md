@@ -55,6 +55,10 @@ query the Auction House themselves when you click Scan.
 - **Disenchant Flip tab in the Auction House.** Scan armor and weapons whose
   buyout is below the value of the enchanting materials they disenchant into.
   The best deal opens in the native Buy tab; buy it and disenchant it manually.
+- **Sniper tab in the Auction House.** Watch a short list of high-volume cloth,
+  herb and ore commodities and alert when a listing is at or below vendor sell
+  plus a spread. Manual secure buy; Blizzard throttles searches and does not
+  allow addons to purchase automatically.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
 
@@ -145,6 +149,30 @@ results either bundle a table of quality/class/item-level rules or record your
 own disenchants. OpenMargin reads a public API when one is available rather than
 shipping its own table.
 
+## Sniper
+
+The **Sniper** tab (or `/om snipe`) watches a short list of high-volume
+commodities for cheap listings. It is built for near-vendor sniping, not for
+full Auction House scans.
+
+- **Max over vendor** sets the buy limit: vendor sell price + this spread.
+  Linen Cloth vendors for 13c, so `2c` means buy at 15c or less.
+- **Max per buy** caps how much one snipe purchase may spend. Blank means no
+  separate cap.
+- The default watchlist is cloth, herbs and ore, with skinning/leather excluded.
+  Add or remove items in the tab, or use `/om snipe add <item>` and
+  `/om snipe remove <item>`.
+- **Start** cycles through the watchlist one item at a time. When a listing is at
+  or below the limit, it plays a sound, prints a chat line, and shows the deal.
+- Click **Buy** to buy the available units at or below the limit. The purchase
+  is re-quoted and cancelled if the price moved.
+
+Blizzard limits searches to roughly 100 per minute and often spaces them out
+further. Keep the watchlist to a few items for the fastest cycle; a long list
+means each item is checked less often. Addons cannot buy automatically: each
+purchase needs a secure click. Other players and snipers are competing for the
+same listings, so this is a fast manual alert, not a guaranteed catch.
+
 ## Buy order diagnostics
 
 If a buy order misbehaves, turn on capture and reproduce it:
@@ -229,6 +257,9 @@ recipes are captured.
 | `/om buy` | Open the Buy Orders tab in the Auction House |
 | `/om vendor` | Open the Vendor Flip tab in the Auction House |
 | `/om de` | Open the Disenchant Flip tab in the Auction House |
+| `/om snipe` | Open the Sniper tab in the Auction House |
+| `/om snipe start\|stop` | Start or stop the sniper loop |
+| `/om snipe add\|remove <item>` | Edit the snipe watchlist |
 | `/om sort` | Toggle sort by profit |
 | `/om tag profit\|margin\|both` | Choose the recipe tag |
 | `/om net ah\|vendor` | Choose Auction House or vendor net |

@@ -17,6 +17,8 @@ ns.defaults = {
 		vendorCap = 0,
 		vendorOver = 0,
 		vendorCommoditiesOnly = true,
+		snipeOver = 5,
+		snipeBudget = 0,
 	},
 	recipes = {},
 	known = {},
@@ -78,6 +80,8 @@ function ns.InitDB()
 	settings.vendorCap = math.max(0, tonumber(settings.vendorCap) or 0)
 	settings.vendorOver = math.max(0, tonumber(settings.vendorOver) or 0)
 	settings.vendorCommoditiesOnly = settings.vendorCommoditiesOnly ~= false
+	settings.snipeOver = math.max(0, tonumber(settings.snipeOver) or 5)
+	settings.snipeBudget = math.max(0, tonumber(settings.snipeBudget) or 0)
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
@@ -227,6 +231,7 @@ function ns.RefreshAll()
 		if ns.RefreshBuyFrame then ns.RefreshBuyFrame() end
 		if ns.RefreshVendorFrame then ns.RefreshVendorFrame() end
 		if ns.RefreshDisenchantFrame then ns.RefreshDisenchantFrame() end
+		if ns.RefreshSniperFrame then ns.RefreshSniperFrame() end
 		if ns.RefreshOptions then ns.RefreshOptions() end
 	end)
 	if not ok then ns.ReportError(err) end

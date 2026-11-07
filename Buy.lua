@@ -629,6 +629,7 @@ end
 function ns.BeginSecureBuy(row)
 	if not row or not row.rule then return end
 	if ns.vendor and ns.vendor.pending then return end
+	if ns.snipe and ns.snipe.pending then return end
 	if ns.buyPending then
 		-- A second click while a purchase is pending must not click the native
 		-- Buy button again.
@@ -643,6 +644,7 @@ end
 function ns.OnBuyRowClick(rule, row)
 	if not rule then return end
 	if ns.vendor and ns.vendor.pending then return end
+	if ns.snipe and ns.snipe.pending then return end
 	if row then ns.CommitBuyRow(row) end
 	if ns.buyPending then return end
 
@@ -924,6 +926,8 @@ local function selectOwnTab()
 	if ns.vendorFrame then ns.vendorFrame:Hide() end
 	if ns.disAhTab then PanelTemplates_DeselectTab(ns.disAhTab) end
 	if ns.disFrame then ns.disFrame:Hide() end
+	if ns.snipeAhTab then PanelTemplates_DeselectTab(ns.snipeAhTab) end
+	if ns.snipeFrame then ns.snipeFrame:Hide() end
 	PanelTemplates_SelectTab(ns.ahTab)
 	ah:SetTitle("Buy Orders")
 
