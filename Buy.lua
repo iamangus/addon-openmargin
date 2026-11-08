@@ -734,8 +734,10 @@ function ns.StartBuy(rule)
 			local dialogShown = _G.AuctionHouseFrame and _G.AuctionHouseFrame.BuyDialog
 				and _G.AuctionHouseFrame.BuyDialog:IsShown() or false
 			local target = pending.target
-			local targetEnabled = target and target.IsEnabled and target:IsEnabled() or "?"
-			local targetVisible = target and target.IsVisible and target:IsVisible() or "?"
+			local targetEnabled = "?"
+			local targetVisible = "?"
+			if target and type(target.IsEnabled) == "function" then targetEnabled = target:IsEnabled() end
+			if target and type(target.IsVisible) == "function" then targetVisible = target:IsVisible() end
 			local clickbutton = pending.secure and pending.secure.GetAttribute and pending.secure:GetAttribute("clickbutton") or nil
 			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s targetEnabled=%s targetVisible=%s clickbutton=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()), tostring(targetEnabled), tostring(targetVisible), tostring(clickbutton ~= nil))
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -1091,8 +1093,15 @@ local function selectOwnTab()
 	local ah = _G.AuctionHouseFrame
 	if not ah or not ns.ahTab then return end
 
-	ah:SetDisplayMode({})
-	ah.displayMode = nil
+	-- Keep Blizzard's commodity buy page shown underneath the custom tab so
+	-- its protected Buy button is visible to the secure proxy.
+	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
+	if nativeMode then
+		ah:SetDisplayMode(nativeMode)
+	else
+		ah:SetDisplayMode({})
+		ah.displayMode = nil
+	end
 
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do

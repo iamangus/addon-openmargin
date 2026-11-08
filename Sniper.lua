@@ -873,8 +873,13 @@ function ns.SelectSniperTab()
 		return ok
 	end
 
-	ah:SetDisplayMode({})
-	ah.displayMode = nil
+	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
+	if nativeMode then
+		ah:SetDisplayMode(nativeMode)
+	else
+		ah:SetDisplayMode({})
+		ah.displayMode = nil
+	end
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do PanelTemplates_DeselectTab(tabs[index]) end
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end
