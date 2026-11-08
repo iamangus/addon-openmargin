@@ -466,9 +466,7 @@ function ns.ArmSniperBuy()
 	if not secure or inCombat() then return end
 	local deal = topDeal()
 	if not deal then return end
-	local target = ns.GetNativeBuyTarget()
-	if not target then return end
-	secure:SetAttribute("clickbutton", target)
+	secure:SetAttribute("clickbutton", nil)
 	secure:Enable()
 	secure:SetAlpha(1)
 	secure:Show()
@@ -597,18 +595,10 @@ function ns.RefreshSniperFrame()
 	if secure and not inCombat() then
 		secure:Show()
 		if top and not state.pending then
-			local target = ns.GetNativeBuyTarget()
-			if target then
-				secure:SetAttribute("clickbutton", target)
-				secure:Enable()
-				secure:SetAlpha(1)
-				secure:SetText("Buy")
-			else
-				secure:SetAttribute("clickbutton", nil)
-				secure:Disable()
-				secure:SetAlpha(0.5)
-				secure:SetText("Buy")
-			end
+			secure:SetAttribute("clickbutton", nil)
+			secure:Enable()
+			secure:SetAlpha(1)
+			secure:SetText("Buy")
 		else
 			secure:SetAttribute("clickbutton", nil)
 			secure:Disable()
@@ -698,14 +688,18 @@ function ns.BeginSnipeBuy()
 	}
 	state.pending = pending
 	state.status = "Checking price..."
-	local target = ns.PrepareNativeBuy(plan)
-	if not target then
+	local started, startError = ns.StartCommodityQuote(plan)
+	if not started then
 		state.pending = nil
-		state.status = "Native auction buy button unavailable"
+		state.status = "Could not start the purchase: " .. tostring(startError or "?")
 		ns.RefreshSniperFrame()
 		return
 	end
-	if ns.snipeSecureButton then ns.snipeSecureButton:SetText("Buying...") end
+	if ns.snipeSecureButton then
+		ns.snipeSecureButton:SetAttribute("clickbutton", nil)
+		ns.snipeSecureButton:SetText("Buying...")
+	end
+	log("snipe quote start itemID=%s qty=%d cost=%d ok=%s err=%s", tostring(plan.itemID), plan.quantity, plan.cost, tostring(started), tostring(startError))
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if state.pending == pending and pending.phase == "quote" then
@@ -873,13 +867,8 @@ function ns.SelectSniperTab()
 		return ok
 	end
 
-	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
-	if nativeMode then
-		ah:SetDisplayMode(nativeMode)
-	else
-		ah:SetDisplayMode({})
-		ah.displayMode = nil
-	end
+	ah:SetDisplayMode({})
+	ah.displayMode = nil
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do PanelTemplates_DeselectTab(tabs[index]) end
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end

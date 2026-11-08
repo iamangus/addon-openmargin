@@ -248,19 +248,16 @@ local function refreshRule(rule)
 end
 
 -- Light the secure Buy button immediately after a plan is ready, before the
--- rest of the row redraw. The click still goes through the native button.
+-- rest of the row redraw.
 function ns.ArmBuyRowSecure(rule)
 	local state = rule and ns.GetBuyState(rule)
 	local row = state and state.row
 	local secure = row and row.secureBuyButton
 	if not secure or not state.plan or inCombat() then return end
 	if not ns.IsBuyFrameShown() then return end
-	if not ns.GetNativeBuyTarget() then return end
-	local prepared = ns.PrepareNativeBuy(state.plan)
-	if not prepared then return end
 	state.armedPlan = state.plan
 	ns.armedBuyRule = rule
-	secure:SetAttribute("clickbutton", prepared)
+	secure:SetAttribute("clickbutton", nil)
 	secure:SetText(string.format("Buy %d", state.plan.quantity))
 	secure:Enable()
 	secure:SetAlpha(1)
@@ -274,14 +271,12 @@ function ns.ArmBlindBuy(rule, plan)
 	local row = state and state.row
 	local secure = row and row.secureBuyButton
 	if not secure or not plan or inCombat() or not ns.IsBuyFrameShown() then return false end
-	local prepared = ns.PrepareNativeBuy(plan)
-	if not prepared then return false end
 	state.phase = "ready"
 	state.plan = plan
 	state.armedPlan = plan
 	ns.armedBuyRule = rule
 	state.blindKey = string.format("%s|%s|%s", tostring(plan.itemID), tostring(plan.quantity), tostring(plan.maxUnit))
-	secure:SetAttribute("clickbutton", prepared)
+	secure:SetAttribute("clickbutton", nil)
 	secure:SetText(string.format("Buy %d", plan.quantity))
 	secure:Enable()
 	secure:SetAlpha(1)
@@ -655,52 +650,6 @@ function ns.GetNativeBuyTarget()
 	return nil
 end
 
-function ns.GetNativeCommodityPage()
-	local ah = _G.AuctionHouseFrame
-	local frame = type(ah) == "table" and ah.CommoditiesBuyFrame or nil
-	local display = type(frame) == "table" and frame.BuyDisplay or nil
-	return ah, frame, display
-end
-
--- The secure proxy can only click a visible protected button. Blizzard's
--- commodity buy page is normally hidden behind our custom tabs, so restore it
--- right before arming a purchase. The custom tab frame is put back on top.
-function ns.EnsureCommodityPage()
-	local ah, frame, display = ns.GetNativeCommodityPage()
-	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
-	if not ah or not frame or not display or not nativeMode then return false end
-
-	-- Nothing to do while the page is already visible. Avoid touching the
-	-- display mode mid-purchase, because that hides Blizzard's BuyDialog.
-	if frame:IsShown() and display:IsShown() then return true end
-	if ah.BuyDialog and ah.BuyDialog:IsShown() then return true end
-
-	local restore = {}
-	local candidates = { ns.buyFrame, ns.vendorFrame, ns.disFrame, ns.snipeFrame }
-	for index = 1, #candidates do
-		local candidate = candidates[index]
-		if candidate and candidate:IsShown() then
-			restore[#restore + 1] = candidate
-		end
-	end
-
-	local mode = ah.GetDisplayMode and ah:GetDisplayMode() or ah.displayMode
-	local changed = mode ~= nativeMode
-	if changed then pcall(ah.SetDisplayMode, ah, nativeMode) end
-	if not frame:IsShown() then pcall(frame.Show, frame) end
-	if not display:IsShown() then pcall(display.Show, display) end
-
-	for index = 1, #restore do
-		restore[index]:Show()
-	end
-
-	local visible = frame:IsShown() and display:IsShown()
-	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
-		log("native page changed=%s frame=%s display=%s restore=%s", tostring(changed), tostring(frame:IsShown()), tostring(display:IsShown()), tostring(#restore))
-	end
-	return visible
-end
-
 function ns.DisableNativeBuy()
 	local target, display = ns.GetNativeBuyTarget()
 	if not target or not display then return end
@@ -712,22 +661,25 @@ function ns.DisableNativeBuy()
 	ns.armedBuyRule = nil
 end
 
-function ns.PrepareNativeBuy(plan)
-	ns.EnsureCommodityPage()
-	local target, display = ns.GetNativeBuyTarget()
-	if not target or not display or not plan or not plan.quantity or plan.quantity <= 0 then
-		return nil
+-- Ask the auction house for a price quote. Blizzard now marks the native Buy
+-- button as forbidden scripted input, so a secure proxy cannot press it. The
+-- C_AuctionHouse entry point itself still accepts plain addon values, which is
+-- also how other auction addons buy commodities.
+function ns.StartCommodityQuote(plan)
+	if not plan then return false, "no purchase plan" end
+	local itemID = tonumber(plan.itemID)
+	local quantity = tonumber(plan.quantity)
+	if not itemID or not quantity or quantity <= 0 then
+		return false, "invalid purchase plan"
 	end
-	local unitPrice = math.floor(plan.cost / plan.quantity + 0.5)
-	local ok = pcall(function()
-		if display.SetItemIDAndPrice then display:SetItemIDAndPrice(plan.itemID, unitPrice) end
-		if display.QuantityInput then display.QuantityInput:SetQuantity(plan.quantity) end
-		if display.SetPrice then display:SetPrice(unitPrice, plan.cost) end
-		if display.UpdateBuyButton then display:UpdateBuyButton() end
-		target:Enable()
-	end)
-	if not ok then return nil end
-	return target, display
+	local api = _G.C_AuctionHouse
+	if not api or type(api.StartCommoditiesPurchase) ~= "function" then
+		return false, "auction house purchase API unavailable"
+	end
+	local unitPrice = math.floor((tonumber(plan.cost) or 0) / quantity + 0.5)
+	local ok, err = pcall(api.StartCommoditiesPurchase, itemID, quantity, unitPrice)
+	if not ok then return false, tostring(err) end
+	return true
 end
 
 function ns.StartBuy(rule)
@@ -751,47 +703,32 @@ function ns.StartBuy(rule)
 	ns.buyPending = pending
 	state.phase = "quoting"
 	state.status = "Checking price..."
+	state.armedPlan = nil
 
-	-- Always re-arm on mouse-down, even if the plan was pre-armed. The AH can
-	-- invalidate the native Buy button between the pre-arm and the click.
-	local target = ns.PrepareNativeBuy(plan)
-	pending.target = target
-	if not target then
-		ns.DisableNativeBuy()
+	local started, startError = ns.StartCommodityQuote(plan)
+	if not started then
 		ns.buyPending = nil
 		state.phase = "idle"
-		state.status = "Native auction buy button unavailable"
+		state.status = "Could not start the purchase: " .. tostring(startError or "?")
+		ns.Print("Buy Orders: could not start the purchase (" .. tostring(startError or "?") .. ").")
 		refreshRule(rule)
 		return
 	end
-	state.armedPlan = nil
 
 	-- Do not hide the secure button here: it was just pressed and its OnClick
 	-- still has to run. Refresh on the next frame, after the click.
 	if row and row.secureBuyButton then
-		row.secureBuyButton:SetAttribute("clickbutton", target)
+		row.secureBuyButton:SetAttribute("clickbutton", nil)
 		row.secureBuyButton:SetText("Buying...")
 	end
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
-		local targetVisible = target and type(target.IsVisible) == "function" and target:IsVisible() or "?"
-		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s visible=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost), tostring(targetVisible))
+		log("quote start itemID=%s quantity=%s unitPrice=%s total=%s ok=%s err=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost), tostring(started), tostring(startError))
 	end
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if ns.buyPending == pending and pending.phase == "quote" then
-			local dialogShown = _G.AuctionHouseFrame and _G.AuctionHouseFrame.BuyDialog
-				and _G.AuctionHouseFrame.BuyDialog:IsShown() or false
-			local target = pending.target
-			local targetEnabled = "?"
-			local targetVisible = "?"
-			if target and type(target.IsEnabled) == "function" then targetEnabled = target:IsEnabled() end
-			if target and type(target.IsVisible) == "function" then targetVisible = target:IsVisible() end
-			local clickbutton = pending.secure and pending.secure.GetAttribute and pending.secure:GetAttribute("clickbutton") or nil
-			local nativeAh, nativeFrame, nativeDisplay = ns.GetNativeCommodityPage()
-			local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
-			local mode = nativeAh and (nativeAh.GetDisplayMode and nativeAh:GetDisplayMode() or nativeAh.displayMode)
-			local modeName = mode == nativeMode and "commodities" or tostring(mode)
-			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s targetEnabled=%s targetVisible=%s clickbutton=%s frameShown=%s displayShown=%s ahShown=%s mode=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()), tostring(targetEnabled), tostring(targetVisible), tostring(clickbutton ~= nil), tostring(nativeFrame and nativeFrame:IsShown()), tostring(nativeDisplay and nativeDisplay:IsShown()), tostring(nativeAh and nativeAh:IsShown()), modeName)
+			local blocked = ns.lastBlockedAction and tostring(ns.lastBlockedAction) or "none"
+			log("quote timeout itemID=%s throttleReady=%s blocked=%s", tostring(pending.plan.itemID), tostring(throttleReady()), blocked)
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 			ns.HideBuyDialog()
 			ns.buyPending = nil
@@ -832,25 +769,6 @@ function ns.BeginSecureBuy(row)
 	local state = ns.GetBuyState(row.rule)
 	if state.phase ~= "ready" or not state.plan then return end
 	ns.StartBuy(row.rule)
-end
-
-function ns.OnBuyRowClick(rule, row)
-	if not rule then return end
-	if ns.vendor and ns.vendor.pending then return end
-	if ns.snipe and ns.snipe.pending then return end
-	if row then ns.CommitBuyRow(row) end
-	if ns.buyPending then return end
-
-	local state = ns.GetBuyState(rule)
-	log("click itemID=%s phase=%s planAge=%s pending=%s", tostring(rule.itemID), tostring(state.phase), tostring(state.plan and (GetTime() - state.plan.at) or nil), tostring(ns.buyPending ~= nil))
-	if state.phase == "ready" then
-		-- Normally the secure Buy button handles this. If it is not shown,
-		-- the native Auction House buy button is unavailable.
-		state.status = "Native auction buy button unavailable"
-		refreshRule(rule)
-	elseif state.phase == "idle" then
-		ns.SearchBuyRule(rule)
-	end
 end
 
 function ns.HandleCommodityPrice(unitPrice, totalPrice)
@@ -1073,6 +991,7 @@ function ns.OnBuyEvent(event, ...)
 			local ok, value = pcall(_G.debugstack, 2, 20, 20)
 			if ok and value then stack = tostring(value) end
 		end
+		ns.lastBlockedAction = tostring(blockedFunction or blockedAddon or "?")
 		log("ACTION %s addon=%s function=%s stack=%s", tostring(event), tostring(blockedAddon), tostring(blockedFunction), stack)
 		if not ns.actionBlockedReported then
 			ns.actionBlockedReported = true
@@ -1145,10 +1064,8 @@ local function selectOwnTab()
 	local ah = _G.AuctionHouseFrame
 	if not ah or not ns.ahTab then return end
 
-	-- Keep Blizzard's commodity buy page shown underneath the custom tab so
-	-- its protected Buy button is visible to the secure proxy.
-	if ns.buyFrame then ns.buyFrame:Show() end
-	ns.EnsureCommodityPage()
+	ah:SetDisplayMode({})
+	ah.displayMode = nil
 
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do
@@ -1528,9 +1445,7 @@ function ns.UpdateBuyRow(row)
 	end
 
 	if not busySelf and state.phase == "ready" and state.plan then
-		if not ns.GetNativeBuyTarget() then
-			state.status = "Native auction Buy button unavailable - open the AH Commodities tab once"
-		elseif not (state.messageUntil and GetTime() < state.messageUntil) then
+		if not (state.messageUntil and GetTime() < state.messageUntil) then
 			state.status = string.format("Buy %d at <= %s each", state.plan.quantity, ns.FormatMoneyFull(state.plan.maxUnit))
 		end
 	end
@@ -1545,8 +1460,8 @@ function ns.UpdateBuyRow(row)
 			secure:SetText("Buying...")
 			secure:Disable()
 			secure:SetAlpha(0.5)
-		elseif not busyOther and state.phase == "ready" and state.plan and ns.GetNativeBuyTarget() then
-			secure:SetAttribute("clickbutton", ns.GetNativeBuyTarget())
+		elseif not busyOther and state.phase == "ready" and state.plan then
+			secure:SetAttribute("clickbutton", nil)
 			secure:SetText(string.format("Buy %d", state.plan.quantity))
 			secure:Enable()
 			secure:SetAlpha(1)
@@ -1625,13 +1540,7 @@ function ns.UpdateBuyKeyButton()
 	if ns.armedBuyRule ~= row.rule or state.armedPlan ~= state.plan then
 		ns.ArmBlindBuy(row.rule, state.plan)
 	end
-	local target = ns.GetNativeBuyTarget()
-	if not target then
-		button:SetAttribute("clickbutton", nil)
-		button:Disable()
-		return
-	end
-	button:SetAttribute("clickbutton", target)
+	button:SetAttribute("clickbutton", nil)
 	button:Enable()
 end
 

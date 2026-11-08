@@ -52,15 +52,14 @@ query the Auction House themselves when you click Scan.
   can be reset per order.
 - **Vendor Flip tab in the Auction House.** Scan for auctions that vendor for
   more than their buyout, ranked by percent margin, with a per-scan spending
-  cap. Commodities are bought through the secure Auction House Buy button;
+  cap. Commodities are bought through the Auction House purchase API;
   non-commodity deals open in the native Buy tab for the final Buyout click.
 - **Disenchant Flip tab in the Auction House.** Scan armor and weapons whose
   buyout is below the value of the enchanting materials they disenchant into.
   The best deal opens in the native Buy tab; buy it and disenchant it manually.
 - **Sniper tab in the Auction House.** Watch a short list of high-volume cloth,
   herb and ore commodities and alert when a listing is at or below vendor sell
-  plus a spread. Manual secure buy; Blizzard throttles searches and does not
-  allow addons to purchase automatically.
+  plus a spread. One click buys the top deal; Blizzard throttles searches.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
 
@@ -89,12 +88,10 @@ Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 2. Set **Max each** (for example `13c`), **Budget** (blank = use your available
    money) and **Qty** (how many units to request per purchase; default 20).
    Accepted money input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
-3. Click **Buy**. There is no search step: OpenMargin starts a commodity
-   purchase for that quantity, takes the Auction House's live quote, and
-   confirms only if the quoted unit price is at or below **Max each** and the
-   total fits the remaining budget and your money. If the row says the native
-   Auction House Buy button is unavailable, open the AH **Commodities** tab once
-   so Blizzard builds it.
+3. Click **Buy**. There is no search step: OpenMargin asks the Auction House
+   for a live quote for that quantity and confirms only if the quoted unit
+   price is at or below **Max each** and the total fits the remaining budget
+   and your money.
 4. Spam **Buy** to keep buying. The button stays armed for the next purchase;
    when a quote is above your limit or stock is unavailable, the purchase is
    cancelled and the row reports why.
@@ -104,7 +101,7 @@ round trip, but the quote is for the whole requested quantity, so a large
 **Qty** can include higher price tiers. If the quoted average is above **Max
 each**, the purchase is cancelled. Use a smaller Qty for tighter price control.
 
-One secure click is still required per purchase, and the AH holds one commodity
+One click is still required per purchase, and the AH holds one commodity
 purchase at a time. **Remaining** is the budget minus what this order has spent;
 **Reset** gives it a fresh budget.
 
@@ -139,8 +136,8 @@ commodities priced at or below what a vendor pays, plus an optional tolerance.
 5. As you spend, deals beyond the remaining cap or money are skipped.
 
 The scan is a snapshot, not a live feed. Commodity purchases use the same
-secure Auction House Buy button as Buy Orders; the purchase quote is checked
-against your vendor limit before confirming. Items with no cached vendor sell
+Auction House quote path as Buy Orders; the quote is checked against your
+vendor limit before confirming. Items with no cached vendor sell
 price are skipped until their item data loads.
 
 ## Disenchant Flip
@@ -186,9 +183,9 @@ full Auction House scans.
 
 Blizzard limits searches to roughly 100 per minute and often spaces them out
 further. Keep the watchlist to a few items for the fastest cycle; a long list
-means each item is checked less often. Addons cannot buy automatically: each
-purchase needs a secure click. Other players and snipers are competing for the
-same listings, so this is a fast manual alert, not a guaranteed catch.
+means each item is checked less often. Each purchase needs a click so you stay
+in control of the rate. Other players and snipers are competing for the same
+listings, so this is a fast manual alert, not a guaranteed catch.
 
 ## Buy order diagnostics
 

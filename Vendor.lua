@@ -185,10 +185,9 @@ local function refreshVendorFrame()
 	if vendor.pending then
 		showSecure = false
 	elseif not inCombat() and activeScan and top and top.kind == "commodity" then
-		local target = ns.GetNativeBuyTarget()
-		if target and ns.ComputeCommodityDeal(top) and top.quantity > 0 then
+		if ns.ComputeCommodityDeal(top) and top.quantity > 0 then
 			showSecure = true
-			secure:SetAttribute("clickbutton", target)
+			secure:SetAttribute("clickbutton", nil)
 			secure:SetText(string.format("Buy %d", top.quantity))
 		end
 	end
@@ -714,16 +713,19 @@ function ns.BeginVendorBuy()
 	}
 	vendor.pending = pending
 	vendor.status = "Checking price..."
-	local target = ns.PrepareNativeBuy(plan)
-	if not target then
+	local started, startError = ns.StartCommodityQuote(plan)
+	if not started then
 		vendor.pending = nil
-		vendor.status = "Native auction buy button unavailable"
+		vendor.status = "Could not start the purchase: " .. tostring(startError or "?")
 		ns.RefreshVendorFrame()
 		return
 	end
 
-	if ns.vendorSecureButton then ns.vendorSecureButton:SetText("Buying...") end
-	log("vendor armed itemID=%s qty=%d cost=%d", tostring(plan.itemID), plan.quantity, plan.cost)
+	if ns.vendorSecureButton then
+		ns.vendorSecureButton:SetAttribute("clickbutton", nil)
+		ns.vendorSecureButton:SetText("Buying...")
+	end
+	log("vendor quote start itemID=%s qty=%d cost=%d ok=%s err=%s", tostring(plan.itemID), plan.quantity, plan.cost, tostring(started), tostring(startError))
 
 	ns.After(QUOTE_TIMEOUT, function()
 		if vendor.pending == pending and pending.phase == "quote" then
@@ -922,13 +924,8 @@ function ns.SelectVendorTab()
 		return ok
 	end
 
-	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
-	if nativeMode then
-		ah:SetDisplayMode(nativeMode)
-	else
-		ah:SetDisplayMode({})
-		ah.displayMode = nil
-	end
+	ah:SetDisplayMode({})
+	ah.displayMode = nil
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do PanelTemplates_DeselectTab(tabs[index]) end
 	if ns.ahTab then PanelTemplates_DeselectTab(ns.ahTab) end
