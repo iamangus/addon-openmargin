@@ -1480,6 +1480,70 @@ function ns.UpdateBuyRow(row)
 	end
 
 	row.resetButton:SetEnabled(not busySelf)
+	ns.UpdateBuyKeyButton()
+end
+
+function ns.GetBuyKeyRow()
+	local rows = ns.buyRows or {}
+	for index = 1, #rows do
+		local row = rows[index]
+		local rule = row and row.rule
+		local state = rule and ns.GetBuyState(rule)
+		if state and state.phase == "ready" and state.plan then
+			return row
+		end
+	end
+	return nil
+end
+
+function ns.UpdateBuyKeyButton()
+	local button = ns.buyKeyButton
+	if not button then return end
+	if ns.buyPending then
+		button:SetAttribute("clickbutton", nil)
+		button:Disable()
+		return
+	end
+	local row = ns.GetBuyKeyRow()
+	ns.buyKeyRow = row
+	local state = row and ns.GetBuyState(row.rule)
+	if not row or not state or state.phase ~= "ready" or not state.plan then
+		button:SetAttribute("clickbutton", nil)
+		button:Disable()
+		return
+	end
+	if ns.armedBuyRule ~= row.rule or state.armedPlan ~= state.plan then
+		ns.ArmBlindBuy(row.rule, state.plan)
+	end
+	local target = ns.GetNativeBuyTarget()
+	if not target then
+		button:SetAttribute("clickbutton", nil)
+		button:Disable()
+		return
+	end
+	button:SetAttribute("clickbutton", target)
+	button:Enable()
+end
+
+function ns.ClearBuyKeyBinding()
+	if ns.buyFrame then pcall(ClearOverrideBindings, ns.buyFrame) end
+end
+
+function ns.ApplyBuyKeyBinding()
+	local frame = ns.buyFrame
+	if not frame then return end
+	ns.ClearBuyKeyBinding()
+	if not frame:IsShown() then return end
+	local key = ns.db and ns.db.settings and ns.db.settings.buyKey
+	if not key or key == "" then return end
+	if not ns.buyKeyButton then return end
+	local ok = pcall(SetOverrideBindingClick, frame, true, key, "OpenMarginBuyKeyButton", "LeftButton")
+	if not ok then ns.Print("Buy Orders: that is not a valid key binding.") end
+end
+
+function ns.BeginKeyBuy()
+	local row = ns.buyKeyRow or ns.GetBuyKeyRow()
+	if row then ns.BeginSecureBuy(row) end
 end
 
 local function createRow(parent)
@@ -1660,6 +1724,16 @@ function ns.CreateBuyFrame(ah)
 	frame:Hide()
 	ns.buyFrame = frame
 
+	local keyButton = CreateFrame("Button", "OpenMarginBuyKeyButton", _G.UIParent, "UIPanelButtonTemplate, SecureActionButtonTemplate")
+	keyButton:SetSize(1, 1)
+	keyButton:SetPoint("TOPLEFT", _G.UIParent, "TOPLEFT", 0, 0)
+	keyButton:SetAlpha(0)
+	keyButton:SetAttribute("type", "click")
+	keyButton:RegisterForClicks("AnyDown")
+	keyButton:SetScript("OnClick", function() ns.BeginKeyBuy() end)
+	keyButton:Show()
+	ns.buyKeyButton = keyButton
+
 	local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -10)
 	title:SetText("Buy Orders")
@@ -1687,6 +1761,35 @@ function ns.CreateBuyFrame(ah)
 		if ns.ShowBuyLog then ns.ShowBuyLog() end
 	end)
 	ns.buyLogButton = logButton
+
+	local keyBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+	keyBox:SetSize(60, 20)
+	keyBox:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -38)
+	keyBox:SetAutoFocus(false)
+	keyBox:SetMaxLetters(20)
+	keyBox:SetText(ns.db and ns.db.settings and ns.db.settings.buyKey or "")
+	keyBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	keyBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	keyBox:SetScript("OnEditFocusLost", function(self)
+		local text = ns.Trim(self:GetText()):upper()
+		ns.db.settings.buyKey = text
+		self:SetText(text)
+		ns.ApplyBuyKeyBinding()
+	end)
+	keyBox:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Buy key")
+		GameTooltip:AddLine("While the Buy Orders tab is open, this key clicks the first ready Buy row.", 1, 1, 1, true)
+		GameTooltip:AddLine("Use a key you do not type in the fields, such as F8.", 0.8, 0.8, 0.8, true)
+		GameTooltip:Show()
+	end)
+	keyBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	ns.buyKeyBox = keyBox
+
+	local keyLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	keyLabel:SetPoint("RIGHT", keyBox, "LEFT", -6, 0)
+	keyLabel:SetText("Buy key:")
+	ns.buyKeyLabel = keyLabel
 
 	local headers = {
 		{ text = "Item", x = 36, width = 188 },
@@ -1723,8 +1826,11 @@ function ns.CreateBuyFrame(ah)
 	ns.buyRows = {}
 	frame:SetScript("OnShow", function()
 		ns.RefreshBuyFrame()
+		ns.UpdateBuyKeyButton()
+		ns.ApplyBuyKeyBinding()
 	end)
 	frame:SetScript("OnHide", function()
+		ns.ClearBuyKeyBinding()
 		ns.HideSecureBuyButtons()
 		if ns.buyLoopRule and ns.StopBuyLoop then
 			ns.StopBuyLoop(ns.buyLoopRule)
@@ -1774,6 +1880,7 @@ function ns.RefreshBuyFrame()
 	content:SetHeight(math.max(#orders * 56, 1))
 	ns.buyEmpty:SetShown(#orders == 0)
 	ns.UpdateSecureButtonVisibility()
+	ns.UpdateBuyKeyButton()
 end
 
 -- ---------------------------------------------------------------------------

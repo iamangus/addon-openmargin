@@ -21,6 +21,7 @@ ns.defaults = {
 		snipeBudget = 0,
 		snipeFocus = 0,
 		snipeFocusOnly = false,
+		buyKey = "",
 	},
 	recipes = {},
 	known = {},
@@ -86,6 +87,7 @@ function ns.InitDB()
 	settings.snipeBudget = math.max(0, tonumber(settings.snipeBudget) or 0)
 	settings.snipeFocus = math.max(0, tonumber(settings.snipeFocus) or 0)
 	settings.snipeFocusOnly = settings.snipeFocusOnly == true
+	settings.buyKey = tostring(settings.buyKey or "")
 
 	if type(ns.db.recipes) ~= "table" then ns.db.recipes = {} end
 	if type(ns.db.known) ~= "table" then ns.db.known = {} end
