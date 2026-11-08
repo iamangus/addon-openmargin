@@ -208,6 +208,20 @@ function ns.InitBuyOrders()
 			end
 		end
 	end
+	local selected = false
+	for index = 1, #orders do
+		local rule = orders[index]
+		if rule.keyTarget then
+			if selected then
+				rule.keyTarget = nil
+			else
+				selected = true
+			end
+		end
+	end
+	if not selected and #orders > 0 then
+		orders[1].keyTarget = true
+	end
 end
 
 function ns.IsAuctionHouseOpen()
@@ -1227,7 +1241,7 @@ function ns.UpdateSecureButtonVisibility()
 		local secure = row.secureBuyButton
 		if secure then
 			local rule = row.rule
-			local state = rule and ns.buyRuntime and ns.buyRuntime[rule]
+			local state = type(rule) == "table" and ns.buyRuntime and ns.buyRuntime[rule] or nil
 			local otherPending = ns.buyPending and ns.buyPending.rule ~= rule
 			local show = rule and state and not otherPending and ns.IsBuyRowVisible(row)
 			secure:SetShown(show and true or false)
@@ -1252,6 +1266,10 @@ function ns.AddBuyRule()
 		spent = 0,
 	}
 	ns.db.buyOrders[#ns.db.buyOrders + 1] = rule
+	for index = 1, #ns.db.buyOrders - 1 do
+		if ns.db.buyOrders[index].keyTarget then rule.keyTarget = false break end
+	end
+	if rule.keyTarget == nil then rule.keyTarget = true end
 	ns.GetBuyState(rule).status = "Set an item and prices"
 	ns.RefreshBuyFrame()
 	return rule
@@ -1263,6 +1281,7 @@ function ns.DeleteBuyRule(rule)
 	local state = ns.GetBuyState(rule)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	rule.removed = true
+	local wasKey = rule.keyTarget
 	if ns.buyLoopRule == rule then ns.buyLoopRule = nil end
 	if state.armedPlan then
 		state.armedPlan = nil
@@ -1273,7 +1292,11 @@ function ns.DeleteBuyRule(rule)
 	for index = #orders, 1, -1 do
 		if orders[index] == rule then table.remove(orders, index) end
 	end
+	if wasKey and #orders > 0 then
+		orders[1].keyTarget = true
+	end
 	ns.RefreshBuyFrame()
+	ns.UpdateBuyKeyButton()
 end
 
 function ns.ResetBuyBudget(rule)
@@ -1406,6 +1429,9 @@ function ns.UpdateBuyRow(row)
 
 	local info = rule.itemID and ns.GetItemInfo(rule.itemID) or nil
 	row.icon:SetTexture(info and info.texture or nil)
+	if row.keyCheck then
+		row.keyCheck:SetChecked(rule.keyTarget == true)
+	end
 
 	local busyOther = ns.buyPending and ns.buyPending.rule ~= rule
 	local busySelf = ns.buyPending and ns.buyPending.rule == rule
@@ -1483,14 +1509,42 @@ function ns.UpdateBuyRow(row)
 	ns.UpdateBuyKeyButton()
 end
 
+function ns.SetBuyKeyRule(rule)
+	if not ns.db then return end
+	local orders = ns.db.buyOrders or {}
+	for index = 1, #orders do
+		orders[index].keyTarget = orders[index] == rule
+	end
+	ns.RefreshBuyFrame()
+	ns.UpdateBuyKeyButton()
+end
+
 function ns.GetBuyKeyRow()
 	local rows = ns.buyRows or {}
+	local selected
 	for index = 1, #rows do
 		local row = rows[index]
 		local rule = row and row.rule
-		local state = rule and ns.GetBuyState(rule)
+		if type(rule) == "table" and rule.keyTarget then
+			selected = row
+			break
+		end
+	end
+	if selected then
+		local state = ns.GetBuyState(selected.rule)
 		if state and state.phase == "ready" and state.plan then
-			return row
+			return selected
+		end
+		return nil
+	end
+	for index = 1, #rows do
+		local row = rows[index]
+		local rule = row and row.rule
+		if type(rule) == "table" then
+			local state = ns.GetBuyState(rule)
+			if state and state.phase == "ready" and state.plan then
+				return row
+			end
 		end
 	end
 	return nil
@@ -1506,7 +1560,7 @@ function ns.UpdateBuyKeyButton()
 	end
 	local row = ns.GetBuyKeyRow()
 	ns.buyKeyRow = row
-	local state = row and ns.GetBuyState(row.rule)
+	local state = row and type(row.rule) == "table" and ns.GetBuyState(row.rule) or nil
 	if not row or not state or state.phase ~= "ready" or not state.plan then
 		button:SetAttribute("clickbutton", nil)
 		button:Disable()
@@ -1559,6 +1613,18 @@ local function createRow(parent)
 	row.icon:SetSize(22, 22)
 	row.icon:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -7)
 	row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+	row.keyCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+	row.keyCheck:SetSize(18, 18)
+	row.keyCheck:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 8, 4)
+	row.keyCheck:SetScript("OnClick", function() ns.SetBuyKeyRule(row.rule) end)
+	row.keyCheck:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Use for Buy key")
+		GameTooltip:AddLine("This order is the one the Buy key triggers.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	row.keyCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	row.itemBox = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
 	row.itemBox:SetSize(188, 20)
@@ -1792,6 +1858,7 @@ function ns.CreateBuyFrame(ah)
 	ns.buyKeyLabel = keyLabel
 
 	local headers = {
+		{ text = "Key", x = 6, width = 24 },
 		{ text = "Item", x = 36, width = 188 },
 		{ text = "Max each", x = 232, width = 66 },
 		{ text = "Budget", x = 308, width = 76 },

@@ -108,9 +108,10 @@ One secure click is still required per purchase, and the AH holds one commodity
 purchase at a time. **Remaining** is the budget minus what this order has spent;
 **Reset** gives it a fresh budget.
 
-Set **Buy key** (for example `F8`) to bind a keyboard key to the first ready
-Buy row while the Buy Orders tab is open. Use a key you do not type into the
-fields; the binding is cleared when the tab closes.
+Set **Buy key** (for example `F8`) to bind a keyboard key to the selected Buy
+row while the Buy Orders tab is open. Use the **Key** checkbox on a row to
+choose which order the key triggers. Use a key you do not type into the fields;
+the binding is cleared when the tab closes.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
 
