@@ -196,6 +196,13 @@ listings, so this is a fast manual alert, not a guaranteed catch.
 Open **Crafting Paths** with `/om paths`. It is a standalone window, so the
 Auction House does not need to be open to read the ranking.
 
+The window has two tabs:
+
+- **My recipes** — paths for professions a character on the account has. This
+  includes recipes you know and recipes you can learn in those professions.
+- **All professions** — everything the addon knows, including recipe items
+  discovered on the Auction House for professions nobody on the account has.
+
 The survey looks at every recipe the addon has captured for every character and
 values each reagent at the cheaper of:
 

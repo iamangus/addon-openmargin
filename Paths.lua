@@ -8,7 +8,7 @@ local addonName, ns = ...
 
 local RECIPE_CLASS_ID = 9
 local ROW_HEIGHT = 44
-local VISIBLE_ROWS = 12
+local VISIBLE_ROWS = 8
 local SURVEY_BATCH = 25
 local EXIT_AH = "ah"
 local EXIT_VENDOR = "vendor"
@@ -106,6 +106,13 @@ function ns.GetCharacterName(charKey)
 	if type(record) == "table" and record.name then return record.name end
 	local name = tostring(charKey or "?"):match("([^-]+)$")
 	return name or tostring(charKey or "?")
+end
+
+function ns.AccountHasProfession(professionID)
+	if not professionID then return false end
+	if ns.GetBestProfessionCharacter(professionID) then return true end
+	ensureAccountKnown()
+	return ns.accountKnownProfessions and ns.accountKnownProfessions[professionID] == true or false
 end
 
 function ns.GetBestProfessionCharacter(professionID)
@@ -503,6 +510,7 @@ function ns.EvaluateRecipePath(recipeID, ctxBest, ctxBuy)
 	local saving = (hasValue(buyCost) and econ.cost < buyCost) and (buyCost - econ.cost) or 0
 
 	local availability, availabilityText = ns.GetPathAvailability(recipeID, record)
+	local mine = ns.AccountHasProfession(record.professionID) or #ns.GetRecipeCharacters(recipeID) > 0
 	local unlockCost, unlockLabel = ns.GetPathUnlockCost(recipeID, record)
 	local payback
 	if unlockCost and best.profit > 0 then
@@ -513,6 +521,8 @@ function ns.EvaluateRecipePath(recipeID, ctxBest, ctxBuy)
 		recipeID = recipeID,
 		itemID = record.outputItemID,
 		name = record.name or ns.GetItemName(record.outputItemID),
+		mine = mine,
+		professionID = record.professionID,
 		professionName = record.professionName,
 		outputQty = econ.outputQty,
 		cost = econ.cost,
@@ -818,10 +828,12 @@ function ns.GetPathRows()
 	local rows = ns.paths.rows or {}
 	local availability = ns.paths.availability or "all"
 	local includeVendor = ns.paths.exitMode == "all"
+	local tab = ns.paths.tab or "mine"
 	local list = {}
 	for index = 1, #rows do
 		local row = rows[index]
 		local keep = true
+		if tab == "mine" and row.mine ~= true then keep = false end
 		if availability ~= "all" and row.availability ~= availability then keep = false end
 		if not includeVendor and row.exit == EXIT_VENDOR then keep = false end
 		if keep then list[#list + 1] = row end
@@ -931,6 +943,7 @@ end
 local function createPathRow(parent)
 	local row = CreateFrame("Button", nil, parent)
 	row:SetHeight(ROW_HEIGHT)
+	row:EnableMouse(true)
 	row:RegisterForClicks("LeftButtonUp")
 
 	local background = row:CreateTexture(nil, "BACKGROUND")
@@ -1178,6 +1191,12 @@ function ns.RenderPathRows(offset)
 	local frame = ns.pathsFrame
 	if not frame or not ns.pathsScroll or not ns.pathsContent then return end
 
+	local scrollWidth = ns.pathsScroll:GetWidth()
+	if not scrollWidth or scrollWidth <= 100 then
+		scrollWidth = (frame:GetWidth() or 780) - 48
+	end
+	ns.pathsContent:SetWidth(math.max(1, scrollWidth - 26))
+
 	local rows = ns.paths.visibleRows or {}
 	ns.pathsContent:SetHeight(math.max(#rows * ROW_HEIGHT, 1))
 
@@ -1218,14 +1237,31 @@ end
 local function cycleButton(parent, x, width, text, onClick)
 	local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
 	button:SetSize(width, 22)
-	button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -72)
+	button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -100)
 	button:SetText(text)
 	button:SetScript("OnClick", onClick)
 	return button
 end
 
+local function styleTab(button, selected)
+	if not button then return end
+	local font
+	if type(button.GetFontString) == "function" then font = button:GetFontString() end
+	if font then
+		if selected then
+			font:SetTextColor(0.25, 1, 0.55)
+		else
+			font:SetTextColor(0.85, 0.85, 0.85)
+		end
+	end
+	button:SetAlpha(selected and 1 or 0.7)
+end
+
 function ns.RefreshPathsButtons()
 	local paths = ns.paths or {}
+	local tab = paths.tab or "mine"
+	styleTab(ns.pathsTabMine, tab == "mine")
+	styleTab(ns.pathsTabGlobal, tab == "global")
 	local availability = paths.availability or "all"
 	local labels = {
 		all = "Availability: All",
@@ -1253,9 +1289,10 @@ function ns.CreatePathsFrame()
 	ns.paths.availability = ns.paths.availability or "all"
 	ns.paths.exitMode = ns.paths.exitMode or "all"
 	ns.paths.sort = ns.paths.sort or "profit"
+	ns.paths.tab = ns.paths.tab or "mine"
 
 	local frame = CreateFrame("Frame", "OpenMarginPathsFrame", _G.UIParent, "InsetFrameTemplate")
-	frame:SetSize(760, 560)
+	frame:SetSize(780, 640)
 	frame:SetPoint("CENTER")
 	frame:SetFrameStrata("DIALOG")
 	frame:SetMovable(true)
@@ -1280,12 +1317,34 @@ function ns.CreatePathsFrame()
 	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -6)
 
+	ns.pathsTabMine = nil
+	ns.pathsTabGlobal = nil
+
 	local status = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	status:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -40)
-	status:SetWidth(720)
+	status:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -70)
+	status:SetWidth(740)
 	status:SetJustifyH("LEFT")
 	status:SetTextColor(0.75, 0.75, 0.75)
 	ns.pathsStatus = status
+
+	local function tabButton(x, width, text, tab)
+		local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+		button:SetSize(width, 22)
+		button:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -40)
+		button:SetText(text)
+		button.tab = tab
+		button:SetScript("OnClick", function()
+			ns.paths.tab = tab
+			ns.RefreshPathsButtons()
+			ns.paths.visibleRows = ns.GetPathRows()
+			if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
+			ns.RenderPathRows(0)
+		end)
+		return button
+	end
+
+	ns.pathsTabMine = tabButton(16, 120, "My recipes", "mine")
+	ns.pathsTabGlobal = tabButton(142, 150, "All professions", "global")
 
 	ns.pathsAvailabilityButton = cycleButton(frame, 16, 170, "Availability: All", function()
 		local order = { "all", "ready", "obtain", "skill" }
@@ -1341,8 +1400,8 @@ function ns.CreatePathsFrame()
 	ns.pathsRefreshButton = refresh
 
 	local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -102)
-	scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -34, 210)
+	scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -128)
+	scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -34, 190)
 	scroll:SetScript("OnVerticalScroll", function(_, offset)
 		ns.RenderPathRows(offset)
 	end)
@@ -1352,9 +1411,16 @@ function ns.CreatePathsFrame()
 	content:SetSize(1, 1)
 	scroll:SetScrollChild(content)
 	ns.pathsContent = content
+	scroll:SetScript("OnSizeChanged", function(self, width)
+		width = width or self:GetWidth()
+		if width and width > 100 then
+			content:SetWidth(math.max(1, width - 26))
+			ns.RenderPathRows()
+		end
+	end)
 
 	local detail = CreateFrame("Frame", nil, frame)
-	detail:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -358)
+	detail:SetPoint("TOPLEFT", scroll, "BOTTOMLEFT", 0, -6)
 	detail:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -14, 14)
 	local detailBackground = detail:CreateTexture(nil, "BACKGROUND")
 	detailBackground:SetAllPoints()
