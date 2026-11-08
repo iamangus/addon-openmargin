@@ -28,6 +28,10 @@ ns.defaults = {
 	meta = {},
 	buyOrders = {},
 	vendorBuy = {},
+	characters = {},
+	recipeItems = {},
+	trainerCosts = {},
+	trainerSkillReq = {},
 }
 
 local function applyDefaults(target, source)
@@ -94,11 +98,16 @@ function ns.InitDB()
 	if type(ns.db.meta) ~= "table" then ns.db.meta = {} end
 	if type(ns.db.buyOrders) ~= "table" then ns.db.buyOrders = {} end
 	if type(ns.db.vendorBuy) ~= "table" then ns.db.vendorBuy = {} end
+	if type(ns.db.characters) ~= "table" then ns.db.characters = {} end
+	if type(ns.db.recipeItems) ~= "table" then ns.db.recipeItems = {} end
+	if type(ns.db.trainerCosts) ~= "table" then ns.db.trainerCosts = {} end
+	if type(ns.db.trainerSkillReq) ~= "table" then ns.db.trainerSkillReq = {} end
 	if ns.InitBuyOrders then ns.InitBuyOrders() end
 	if ns.LoadBuyLog then ns.LoadBuyLog() end
 
 	ns.RebuildRecipeIndex()
 	if ns.SetCharacterKey then ns.SetCharacterKey() end
+	if ns.InvalidateAccountKnown then ns.InvalidateAccountKnown() end
 end
 
 function ns.SetCharacterKey()
@@ -113,6 +122,30 @@ function ns.SetCharacterKey()
 		guid = tostring(realm) .. "-" .. tostring(name)
 	end
 	ns.charKey = guid
+	ns.RegisterCharacter(guid)
+end
+
+-- Remember every character the addon has seen. Professions are filled in
+-- whenever a profession window is opened on that character.
+function ns.RegisterCharacter(charKey)
+	if not charKey or not ns.db then return nil end
+	ns.db.characters = ns.db.characters or {}
+	local record = ns.db.characters[charKey]
+	if type(record) ~= "table" then
+		record = {}
+		ns.db.characters[charKey] = record
+	end
+	if type(_G.UnitName) == "function" then
+		local ok, name, realm = pcall(_G.UnitName, "player")
+		if ok and name then
+			record.name = tostring(name)
+			record.realm = realm and tostring(realm) or record.realm
+		end
+	end
+	record.name = record.name or tostring(charKey):match("([^-]+)$") or tostring(charKey)
+	record.lastSeen = type(_G.time) == "function" and _G.time() or nil
+	record.professions = type(record.professions) == "table" and record.professions or {}
+	return record
 end
 
 function ns.OnSettingChanged()
@@ -177,6 +210,8 @@ function ns.ResetAll()
 	if ns.ClearBuyLog then ns.ClearBuyLog() end
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()
+	if ns.InvalidateAccountKnown then ns.InvalidateAccountKnown() end
+	if ns.MarkPathSurveyDirty then ns.MarkPathSurveyDirty() end
 	if ns.RefreshAll then ns.RefreshAll() end
 	if ns.RefreshOptions then ns.RefreshOptions() end
 end
@@ -223,6 +258,11 @@ function ns.GetStatusLines()
 			.. ", trainer=" .. tostring(ns.trainerHooks and ns.trainerHooks.service == true)
 			.. ", tooltip=" .. tostring(ns.tooltipHooked == true),
 	}
+	if ns.GetCatalogStats then
+		local stats = ns.GetCatalogStats()
+		lines[#lines + 1] = string.format("Crafting catalog: %d recipes, %d recipe items, %d characters",
+			stats.recipes, stats.recipeItems, stats.characters)
+	end
 	if ns.svFresh then
 		lines[#lines + 1] = "SavedVariables were empty at load. On a first install this is normal; if not, restart the client once."
 	end
@@ -238,6 +278,7 @@ function ns.RefreshAll()
 		if ns.RefreshVendorFrame then ns.RefreshVendorFrame() end
 		if ns.RefreshDisenchantFrame then ns.RefreshDisenchantFrame() end
 		if ns.RefreshSniperFrame then ns.RefreshSniperFrame() end
+		if ns.RefreshPathsFrame then ns.RefreshPathsFrame() end
 		if ns.RefreshOptions then ns.RefreshOptions() end
 	end)
 	if not ok then ns.ReportError(err) end

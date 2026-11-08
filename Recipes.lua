@@ -159,7 +159,48 @@ function ns.ScheduleCapture(force)
 	end)
 end
 
+-- Requirement text and met flags, used by the crafting-path survey to tell
+-- learned recipes from skill-gated ones.
+local function captureRequirements(recipeID)
+	if not _G.C_TradeSkillUI or type(_G.C_TradeSkillUI.GetRecipeRequirements) ~= "function" then
+		return nil
+	end
+	local ok, list = pcall(_G.C_TradeSkillUI.GetRecipeRequirements, recipeID)
+	if not ok or type(list) ~= "table" then return nil end
+	local requirements = {}
+	for index = 1, #list do
+		local requirement = list[index]
+		if type(requirement) == "table" then
+			requirements[#requirements + 1] = {
+				name = tostring(requirement.name or ""),
+				met = requirement.met == true,
+				requirementType = requirement.type,
+			}
+		end
+	end
+	if #requirements == 0 then return nil end
+	return requirements
+end
+
+-- Account-wide availability: a requirement counts as met if any captured
+-- character met it. Requirements are keyed by their display text.
+local function mergeRequirements(existing, current)
+	if not current then return existing end
+	if not existing then return current end
+	local met = {}
+	for index = 1, #existing do
+		if existing[index].met then met[existing[index].name] = true end
+	end
+	for index = 1, #current do
+		if current[index].met ~= true and met[current[index].name] then
+			current[index].met = true
+		end
+	end
+	return current
+end
+
 function ns.BuildRecipeRecord(recipeID, recipeInfo, schematic, professionID, professionName)
+	local existing = ns.db and ns.db.recipes and ns.db.recipes[recipeID]
 	local record = {
 		id = recipeID,
 		name = (schematic and schematic.name) or (recipeInfo and recipeInfo.name),
@@ -170,6 +211,9 @@ function ns.BuildRecipeRecord(recipeID, recipeInfo, schematic, professionID, pro
 		outputMin = (schematic and schematic.quantityMin) or 1,
 		outputMax = (schematic and schematic.quantityMax) or (schematic and schematic.quantityMin) or 1,
 		recipeType = schematic and schematic.recipeType,
+		sourceType = recipeInfo and recipeInfo.sourceType or (existing and existing.sourceType),
+		requirements = mergeRequirements(existing and existing.requirements, captureRequirements(recipeID)),
+		recipeItemID = existing and existing.recipeItemID,
 		reagents = {},
 		schemaLoaded = schematic ~= nil,
 		updatedAt = time(),
@@ -242,6 +286,7 @@ function ns.EnsureRecipe(recipeID, professionName)
 	if recipeInfo and recipeInfo.learned and ns.charKey then
 		ns.db.known[ns.charKey] = ns.db.known[ns.charKey] or {}
 		ns.db.known[ns.charKey][recipeID] = true
+		if ns.InvalidateAccountKnown then ns.InvalidateAccountKnown() end
 	end
 
 	ns.ensuring[recipeID] = nil
@@ -271,6 +316,18 @@ function ns.CaptureCurrentProfession(force)
 
 	local professionID = info.professionID
 	local now = time()
+
+	local character = ns.RegisterCharacter and ns.RegisterCharacter(ns.charKey)
+	if character then
+		character.professions = character.professions or {}
+		local profession = character.professions[professionID] or {}
+		profession.name = info.professionName or info.parentProfessionName or profession.name
+		profession.skill = tonumber(info.skillLevel) or profession.skill
+		profession.maxSkill = tonumber(info.maxSkillLevel) or profession.maxSkill
+		profession.at = now
+		character.professions[professionID] = profession
+	end
+
 	ns.capturedThisSession = ns.capturedThisSession or {}
 	if not force and ns.capturedThisSession[professionID] then
 		return
@@ -326,6 +383,7 @@ function ns.ProcessCaptureQueueStep()
 			if recipeInfo.learned and ns.charKey then
 				ns.db.known[ns.charKey] = ns.db.known[ns.charKey] or {}
 				ns.db.known[ns.charKey][recipeID] = true
+				if ns.InvalidateAccountKnown then ns.InvalidateAccountKnown() end
 			end
 		end
 	end
@@ -347,6 +405,7 @@ function ns.ProcessCaptureQueueStep()
 
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()
+	if ns.MarkPathSurveyDirty then ns.MarkPathSurveyDirty() end
 	if ns.RefreshAll then ns.RefreshAll() end
 
 	if ns.pendingForceCapture then
@@ -411,6 +470,7 @@ function ns.AddRecipeToIndex(recipe)
 end
 
 function ns.RebuildRecipeIndex()
+	if ns.PruneSyntheticRecipes then ns.PruneSyntheticRecipes() end
 	ns.byOutput = {}
 	ns.byName = {}
 	ns.byTrainer = {}
@@ -476,4 +536,6 @@ function ns.ResetRecipeData()
 	ns.ensureFailed = {}
 	ns.RebuildRecipeIndex()
 	ns.InvalidatePrices()
+	if ns.InvalidateAccountKnown then ns.InvalidateAccountKnown() end
+	if ns.MarkPathSurveyDirty then ns.MarkPathSurveyDirty() end
 end

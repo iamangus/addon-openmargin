@@ -13,6 +13,7 @@ function ns.InvalidatePrices()
 	ns.priceEpoch = (ns.priceEpoch or 1) + 1
 	ns.sortContext = nil
 	if ns.ClearEconCache then ns.ClearEconCache() end
+	if ns.InvalidatePathSurvey then ns.InvalidatePathSurvey() end
 end
 
 -- Auctionator calls us back whenever it writes new prices, including while a

@@ -25,6 +25,7 @@ local function printHelp()
 		"/om vendor — open the Vendor Flip tab in the Auction House",
 		"/om de — open the Disenchant Flip tab in the Auction House",
 		"/om snipe — open the Sniper tab in the Auction House",
+		"/om paths — open the Crafting Paths survey",
 		"/om snipe start|stop — start or stop the sniper",
 		"/om snipe add|remove <item> — edit the snipe watchlist",
 		"/om buydebug — toggle Auction House buy logging",
@@ -137,6 +138,9 @@ local function handleCommand(message)
 		ns.InvalidatePrices()
 		ns.RefreshAll()
 		ns.Print("Price cache cleared.")
+
+	elseif command == "paths" or command == "craftpaths" then
+		if ns.OpenPaths then ns.OpenPaths() end
 
 	elseif command == "buy" then
 		if ns.OpenBuyOrders then ns.OpenBuyOrders() end

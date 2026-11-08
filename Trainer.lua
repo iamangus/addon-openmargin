@@ -154,6 +154,21 @@ function ns.OnTrainerServiceButton(button, elementData)
 	updateTrainerInfo(button, econ)
 
 	local moneyCost = _G.GetTrainerServiceCost and _G.GetTrainerServiceCost(skillIndex)
+	if moneyCost and moneyCost > 0 then
+		ns.db.trainerCosts = ns.db.trainerCosts or {}
+		ns.db.trainerCosts[recipeID] = moneyCost
+	end
+	if _G.GetTrainerServiceSkillReq then
+		local ok, skillName, skillLevel = pcall(_G.GetTrainerServiceSkillReq, skillIndex)
+		skillLevel = tonumber(skillLevel)
+		if ok and skillLevel and skillLevel > 0 then
+			ns.db.trainerSkillReq = ns.db.trainerSkillReq or {}
+			ns.db.trainerSkillReq[recipeID] = {
+				name = skillName or professionName,
+				skill = skillLevel,
+			}
+		end
+	end
 	local payback
 	if moneyCost and moneyCost > 0 and econ.net and econ.net > 0 then
 		payback = math.ceil(moneyCost / econ.net)

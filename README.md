@@ -60,6 +60,10 @@ query the Auction House themselves when you click Scan.
 - **Sniper tab in the Auction House.** Watch a short list of high-volume cloth,
   herb and ore commodities and alert when a listing is at or below vendor sell
   plus a spread. One click buys the top deal; Blizzard throttles searches.
+- **Crafting Paths window.** Ranks every profitable craft the account can see,
+  including the intermediate crafts that make it cheaper: buy copper ore, smelt
+  it into bars, craft wands. Recipes learned by any character count, and
+  recipes you have not learned are shown with their skill gap or unlock cost.
 - Account-wide recipe data and settings. Learned recipes are tracked per
   character.
 
@@ -187,6 +191,58 @@ means each item is checked less often. Each purchase needs a click so you stay
 in control of the rate. Other players and snipers are competing for the same
 listings, so this is a fast manual alert, not a guaranteed catch.
 
+## Crafting Paths
+
+Open **Crafting Paths** with `/om paths`. It is a standalone window, so the
+Auction House does not need to be open to read the ranking.
+
+The survey looks at every recipe the addon has captured for every character and
+values each reagent at the cheaper of:
+
+- the Auction House price,
+- a vendor,
+- **crafting it yourself** through another recipe.
+
+That is how `Copper Ore → Copper Bar → Copper Wand` beats buying bars. Each row
+shows the chosen exit (**AH**, **DE** or **Vendor**), cost, profit and margin,
+and expanding it shows the full step-by-step chain with the profession and
+character needed at each step.
+
+**Availability**
+
+- **Known** — a character on the account has learned the recipe.
+- **Recipe / Not learned** — the recipe is not learned, but its requirements
+  are met. If a recipe item was found on the Auction House, the row shows its
+  price and how many crafts pay it back.
+- **Skill gap** — a requirement is not met yet. The row shows the requirement
+  and the best character's current profession skill. These are the paths that
+  are not available yet but could be soon.
+- **No profession** — the recipe item was discovered on the Auction House, but
+  no character has that profession.
+
+**Filling the catalog**
+
+- Opening a profession on each character records its professions, learned
+  recipes and unlearned recipes. Do this once per character after installing or
+  updating. Requirement and skill-gap data refreshes the next time you open
+  that profession or its trainer; `/om recapture` forces it for the open
+  profession.
+- **Scan recipe items** (Auction House open) browses the Recipe item class,
+  matches each item to its recipe with `C_Item.GetItemSpell`, and records its
+  price. This is how recipes for professions nobody on the account has are
+  discovered. It is one browse query, not per-item searches, so it does not
+  use Auctionator's search budget.
+- Recipe items in your bags are picked up automatically when the window opens.
+
+The list is ranked by profit by default; the button cycles to margin and return
+on investment. Vendor paths are real but second class: the money is instant, so
+they always appear below AH and disenchant paths. The exit button switches
+between **All** and **AH + DE** if you want to hide them.
+
+Auctionator still supplies the prices. It cannot enumerate items or map recipe
+items to recipes, so the recipe catalog comes from the addon's own capture and
+browse scan.
+
 ## Buy order diagnostics
 
 If a buy order misbehaves, turn on capture and reproduce it:
@@ -214,7 +270,8 @@ the open on GitHub.
 
 ## Limitations
 
-- No built-in Auction House scan and no TSM support in this build.
+- No full Auction House scan and no TSM support in this build. Crafting Paths
+  only browses the Recipe item class to find recipe items.
 - **Buy orders support commodities only** (cloth, ore, herbs, enchanting
   materials, and similar trade goods). Non-commodity items have to be bought one
   auction at a time and need a click per auction.
@@ -223,6 +280,11 @@ the open on GitHub.
 - **Vendor Flip uses a snapshot.** It scans the summary and searches candidate
   items once; prices can move before you buy. Items with no cached vendor sell
   price are skipped. Non-commodity deals require the native Buyout click.
+- Crafting Paths can only use recipes the addon has captured, plus recipe
+  items discovered on the Auction House. A trainer-only recipe in a profession
+  no character has, and not listed on the Auction House, cannot be discovered
+  without a bundled recipe catalog. Prices are Auctionator's last scan, so a
+  stale scan produces stale paths.
 - **Estimated sales per day is not available.** Auctionator's public API
   exposes prices, not auction quantity or sale history. The panel shows `—`
   for that row rather than inventing a number.
@@ -272,6 +334,7 @@ recipes are captured.
 | `/om vendor` | Open the Vendor Flip tab in the Auction House |
 | `/om de` | Open the Disenchant Flip tab in the Auction House |
 | `/om snipe` | Open the Sniper tab in the Auction House |
+| `/om paths` | Open the Crafting Paths survey |
 | `/om snipe start\|stop` | Start or stop the sniper loop |
 | `/om snipe add\|remove <item>` | Edit the snipe watchlist |
 | `/om sort` | Toggle sort by profit |
@@ -316,8 +379,11 @@ that asset for installation and automatic updates.
 ## Offline verification
 
 The Lua files pass `luac5.1 -p`, and the costing engine has a self-test covering
-recursive reagent chains, cycles, vendor net, margins and formatting. The full
-addon also loads against a mocked WoW API for offline smoke testing.
+recursive reagent chains, cycles, vendor net, margins and formatting. The
+crafting-path suite covers account-wide known recipes, ore -> bar -> wand
+chains, the smelting fallback, recipe-item discovery, unlock payback, skill
+gaps, vendor tiering and path filtering. The full addon also loads against a
+mocked WoW API for offline smoke testing.
 
 The live client is not available before launch, so layout and a few
 client-specific API paths still need an in-game pass.
