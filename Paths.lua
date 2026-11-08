@@ -41,6 +41,13 @@ local function log(fmt, ...)
 	if ns.BuyLog then ns.BuyLog(fmt, ...) end
 end
 
+local function safeClick(fn)
+	return function(...)
+		local ok, err = pcall(fn, ...)
+		if not ok and ns.ReportError then ns.ReportError(err) end
+	end
+end
+
 local function hasValue(value)
 	return type(value) == "number" and value == value and value > 0
 end
@@ -823,6 +830,16 @@ function ns.InvalidatePathSurvey()
 	ns.paths.rows = nil
 end
 
+function ns.GetPathTabCounts()
+	local mine, all = 0, 0
+	local rows = ns.paths and ns.paths.rows or {}
+	for index = 1, #rows do
+		all = all + 1
+		if rows[index].mine == true then mine = mine + 1 end
+	end
+	return mine, all
+end
+
 function ns.GetPathRows()
 	if not ns.paths then return {} end
 	local rows = ns.paths.rows or {}
@@ -994,9 +1011,9 @@ local function createPathRow(parent)
 	row.margin:SetJustifyH("RIGHT")
 	row.margin:SetTextColor(0.7, 0.7, 0.7)
 
-	row:SetScript("OnClick", function(self)
+	row:SetScript("OnClick", safeClick(function(self)
 		if self.data then ns.SelectPathRow(self.data) end
-	end)
+	end))
 
 	return row
 end
@@ -1107,7 +1124,7 @@ function ns.RefreshPathDetails()
 	lines[#lines + 1] = string.format("Cost %s · buy materials %s · %s",
 		ns.FormatMoney(data.cost),
 		data.buyCost and ns.FormatMoney(data.buyCost) or "?",
-		data.saving > 0 and ("chain saves " .. ns.FormatMoney(data.saving)) or "no cheaper chain")
+		(data.saving or 0) > 0 and ("chain saves " .. ns.FormatMoney(data.saving)) or "no cheaper chain")
 	if data.unlockCost then
 		local payback = data.payback and string.format(" · pays back in %d craft%s", data.payback, data.payback == 1 and "" or "s") or ""
 		lines[#lines + 1] = string.format("Unlock: %s %s%s", data.unlockLabel or "Recipe", ns.FormatMoney(data.unlockCost), payback)
@@ -1178,13 +1195,24 @@ function ns.UpdatePathsHeader()
 		return
 	end
 
+	if ns.paths and ns.paths.visibleRows and #ns.paths.visibleRows == 0 then
+		ns.pathsStatus:SetText("No paths in this view. Try another tab or the availability filter.")
+		return
+	end
+
 	local scanText = "recipe scan never"
 	if ns.db and ns.db.meta and ns.db.meta.lastRecipeScan then
 		scanText = "recipe scan " .. (ns.FormatAge(time() - ns.db.meta.lastRecipeScan) or "unknown")
 	end
-	local profitable = ns.paths and ns.paths.rows and #ns.paths.rows or 0
-	ns.pathsStatus:SetText(string.format("%d characters · %d professions · %d recipes · %d profitable · %d recipe items · %s",
-		stats.characters, stats.professions, stats.recipes, profitable, stats.recipeItems, scanText))
+	local tabName = ns.paths and ns.paths.tab == "global" and "All professions" or "My recipes"
+	local shown = ns.paths and ns.paths.visibleRows and #ns.paths.visibleRows or 0
+	local hint = ""
+	local mineCount, allCount = ns.GetPathTabCounts()
+	if ns.paths and ns.paths.tab == "global" and allCount == mineCount then
+		hint = " · no recipes outside your professions yet; scan recipe items in the AH"
+	end
+	ns.pathsStatus:SetText(string.format("%s · %d shown · %d characters · %d professions · %d recipes · %d recipe items · %s%s",
+		tabName, shown, stats.characters, stats.professions, stats.recipes, stats.recipeItems, scanText, hint))
 end
 
 function ns.RenderPathRows(offset)
@@ -1200,7 +1228,7 @@ function ns.RenderPathRows(offset)
 	local rows = ns.paths.visibleRows or {}
 	ns.pathsContent:SetHeight(math.max(#rows * ROW_HEIGHT, 1))
 
-	offset = offset or ns.pathsScroll:GetVerticalScroll() or 0
+	offset = tonumber(offset) or tonumber(ns.pathsScroll:GetVerticalScroll()) or 0
 	local first = math.floor(offset / ROW_HEIGHT) + 1
 	if first < 1 then first = 1 end
 
@@ -1245,6 +1273,9 @@ end
 
 local function styleTab(button, selected)
 	if not button then return end
+	if button.selectedGlow then
+		button.selectedGlow:SetShown(selected)
+	end
 	local font
 	if type(button.GetFontString) == "function" then font = button:GetFontString() end
 	if font then
@@ -1262,6 +1293,13 @@ function ns.RefreshPathsButtons()
 	local tab = paths.tab or "mine"
 	styleTab(ns.pathsTabMine, tab == "mine")
 	styleTab(ns.pathsTabGlobal, tab == "global")
+	local mineCount, allCount = ns.GetPathTabCounts()
+	if ns.pathsTabMine then
+		ns.pathsTabMine:SetText(string.format("My recipes (%d)", mineCount))
+	end
+	if ns.pathsTabGlobal then
+		ns.pathsTabGlobal:SetText(string.format("All professions (%d)", allCount))
+	end
 	local availability = paths.availability or "all"
 	local labels = {
 		all = "Availability: All",
@@ -1295,6 +1333,8 @@ function ns.CreatePathsFrame()
 	frame:SetSize(780, 640)
 	frame:SetPoint("CENTER")
 	frame:SetFrameStrata("DIALOG")
+	frame:SetFrameLevel(200)
+	frame:SetClampedToScreen(true)
 	frame:SetMovable(true)
 	frame:EnableMouse(true)
 	frame:RegisterForDrag("LeftButton")
@@ -1327,26 +1367,39 @@ function ns.CreatePathsFrame()
 	status:SetTextColor(0.75, 0.75, 0.75)
 	ns.pathsStatus = status
 
+	local function setPathTab(tab)
+		ns.paths.tab = tab
+		ns.paths.visibleRows = ns.GetPathRows()
+		if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
+		ns.RefreshPathsButtons()
+		ns.UpdatePathsHeader()
+		ns.RenderPathRows(0)
+		local mineCount, allCount = ns.GetPathTabCounts()
+		log("paths tab=%s mine=%d all=%d", tostring(tab), mineCount, allCount)
+		if tab == "global" and allCount == mineCount and ns.Print then
+			ns.Print("Crafting Paths: no recipes outside your professions yet. Open the Auction House and click Scan recipe items.")
+		end
+	end
+
 	local function tabButton(x, width, text, tab)
 		local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 		button:SetSize(width, 22)
 		button:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -40)
 		button:SetText(text)
 		button.tab = tab
-		button:SetScript("OnClick", function()
-			ns.paths.tab = tab
-			ns.RefreshPathsButtons()
-			ns.paths.visibleRows = ns.GetPathRows()
-			if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
-			ns.RenderPathRows(0)
-		end)
+		local glow = button:CreateTexture(nil, "BACKGROUND")
+		glow:SetAllPoints()
+		glow:SetColorTexture(0.2, 0.8, 0.5, 0.22)
+		glow:Hide()
+		button.selectedGlow = glow
+		button:SetScript("OnClick", safeClick(function() setPathTab(tab) end))
 		return button
 	end
 
 	ns.pathsTabMine = tabButton(16, 120, "My recipes", "mine")
 	ns.pathsTabGlobal = tabButton(142, 150, "All professions", "global")
 
-	ns.pathsAvailabilityButton = cycleButton(frame, 16, 170, "Availability: All", function()
+	ns.pathsAvailabilityButton = cycleButton(frame, 16, 170, "Availability: All", safeClick(function()
 		local order = { "all", "ready", "obtain", "skill" }
 		local current = ns.paths.availability or "all"
 		local nextIndex = 1
@@ -1361,17 +1414,17 @@ function ns.CreatePathsFrame()
 		ns.paths.visibleRows = ns.GetPathRows()
 		if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
 		ns.RenderPathRows(0)
-	end)
+	end))
 
-	ns.pathsExitButton = cycleButton(frame, 192, 120, "Exit: AH + DE", function()
+	ns.pathsExitButton = cycleButton(frame, 192, 120, "Exit: AH + DE", safeClick(function()
 		ns.paths.exitMode = ns.paths.exitMode == "ahde" and "all" or "ahde"
 		ns.RefreshPathsButtons()
 		ns.paths.visibleRows = ns.GetPathRows()
 		if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
 		ns.RenderPathRows(0)
-	end)
+	end))
 
-	ns.pathsSortButton = cycleButton(frame, 318, 110, "Sort: Profit", function()
+	ns.pathsSortButton = cycleButton(frame, 318, 110, "Sort: Profit", safeClick(function()
 		local order = { "profit", "margin", "roi" }
 		local current = ns.paths.sort or "profit"
 		local nextIndex = 1
@@ -1386,17 +1439,17 @@ function ns.CreatePathsFrame()
 		ns.paths.visibleRows = ns.GetPathRows()
 		if ns.pathsScroll then ns.pathsScroll:SetVerticalScroll(0) end
 		ns.RenderPathRows(0)
-	end)
+	end))
 
-	local scan = cycleButton(frame, 434, 130, "Scan recipe items", function()
+	local scan = cycleButton(frame, 434, 130, "Scan recipe items", safeClick(function()
 		ns.StartRecipeItemScan()
-	end)
+	end))
 	ns.pathsScanButton = scan
 
-	local refresh = cycleButton(frame, 570, 80, "Refresh", function()
+	local refresh = cycleButton(frame, 570, 80, "Refresh", safeClick(function()
 		if ns.InvalidatePathSurvey then ns.InvalidatePathSurvey() end
 		ns.RefreshPathsFrame()
-	end)
+	end))
 	ns.pathsRefreshButton = refresh
 
 	local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
@@ -1463,6 +1516,7 @@ function ns.RefreshPathsFrame()
 	end
 
 	ns.paths.visibleRows = ns.GetPathRows()
+	ns.UpdatePathsHeader()
 	ns.RenderPathRows(ns.pathsScroll and ns.pathsScroll:GetVerticalScroll() or 0)
 	ns.RefreshPathDetails()
 end
@@ -1471,4 +1525,5 @@ function ns.OpenPaths()
 	local frame = ns.CreatePathsFrame()
 	if not frame then return end
 	frame:Show()
+	frame:Raise()
 end
