@@ -655,6 +655,52 @@ function ns.GetNativeBuyTarget()
 	return nil
 end
 
+function ns.GetNativeCommodityPage()
+	local ah = _G.AuctionHouseFrame
+	local frame = type(ah) == "table" and ah.CommoditiesBuyFrame or nil
+	local display = type(frame) == "table" and frame.BuyDisplay or nil
+	return ah, frame, display
+end
+
+-- The secure proxy can only click a visible protected button. Blizzard's
+-- commodity buy page is normally hidden behind our custom tabs, so restore it
+-- right before arming a purchase. The custom tab frame is put back on top.
+function ns.EnsureCommodityPage()
+	local ah, frame, display = ns.GetNativeCommodityPage()
+	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
+	if not ah or not frame or not display or not nativeMode then return false end
+
+	-- Nothing to do while the page is already visible. Avoid touching the
+	-- display mode mid-purchase, because that hides Blizzard's BuyDialog.
+	if frame:IsShown() and display:IsShown() then return true end
+	if ah.BuyDialog and ah.BuyDialog:IsShown() then return true end
+
+	local restore = {}
+	local candidates = { ns.buyFrame, ns.vendorFrame, ns.disFrame, ns.snipeFrame }
+	for index = 1, #candidates do
+		local candidate = candidates[index]
+		if candidate and candidate:IsShown() then
+			restore[#restore + 1] = candidate
+		end
+	end
+
+	local mode = ah.GetDisplayMode and ah:GetDisplayMode() or ah.displayMode
+	local changed = mode ~= nativeMode
+	if changed then pcall(ah.SetDisplayMode, ah, nativeMode) end
+	if not frame:IsShown() then pcall(frame.Show, frame) end
+	if not display:IsShown() then pcall(display.Show, display) end
+
+	for index = 1, #restore do
+		restore[index]:Show()
+	end
+
+	local visible = frame:IsShown() and display:IsShown()
+	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		log("native page changed=%s frame=%s display=%s restore=%s", tostring(changed), tostring(frame:IsShown()), tostring(display:IsShown()), tostring(#restore))
+	end
+	return visible
+end
+
 function ns.DisableNativeBuy()
 	local target, display = ns.GetNativeBuyTarget()
 	if not target or not display then return end
@@ -667,6 +713,7 @@ function ns.DisableNativeBuy()
 end
 
 function ns.PrepareNativeBuy(plan)
+	ns.EnsureCommodityPage()
 	local target, display = ns.GetNativeBuyTarget()
 	if not target or not display or not plan or not plan.quantity or plan.quantity <= 0 then
 		return nil
@@ -726,7 +773,8 @@ function ns.StartBuy(rule)
 		row.secureBuyButton:SetText("Buying...")
 	end
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
-		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost))
+		local targetVisible = target and type(target.IsVisible) == "function" and target:IsVisible() or "?"
+		log("armed native itemID=%s quantity=%s unitPrice=%s total=%s visible=%s", tostring(plan.itemID), tostring(plan.quantity), tostring(math.floor(plan.cost / math.max(1, plan.quantity) + 0.5)), tostring(plan.cost), tostring(targetVisible))
 	end
 
 	ns.After(QUOTE_TIMEOUT, function()
@@ -739,7 +787,11 @@ function ns.StartBuy(rule)
 			if target and type(target.IsEnabled) == "function" then targetEnabled = target:IsEnabled() end
 			if target and type(target.IsVisible) == "function" then targetVisible = target:IsVisible() end
 			local clickbutton = pending.secure and pending.secure.GetAttribute and pending.secure:GetAttribute("clickbutton") or nil
-			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s targetEnabled=%s targetVisible=%s clickbutton=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()), tostring(targetEnabled), tostring(targetVisible), tostring(clickbutton ~= nil))
+			local nativeAh, nativeFrame, nativeDisplay = ns.GetNativeCommodityPage()
+			local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
+			local mode = nativeAh and (nativeAh.GetDisplayMode and nativeAh:GetDisplayMode() or nativeAh.displayMode)
+			local modeName = mode == nativeMode and "commodities" or tostring(mode)
+			log("quote timeout itemID=%s dialogShown=%s throttleReady=%s targetEnabled=%s targetVisible=%s clickbutton=%s frameShown=%s displayShown=%s ahShown=%s mode=%s", tostring(pending.plan.itemID), tostring(dialogShown), tostring(throttleReady()), tostring(targetEnabled), tostring(targetVisible), tostring(clickbutton ~= nil), tostring(nativeFrame and nativeFrame:IsShown()), tostring(nativeDisplay and nativeDisplay:IsShown()), tostring(nativeAh and nativeAh:IsShown()), modeName)
 			pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 			ns.HideBuyDialog()
 			ns.buyPending = nil
@@ -1095,13 +1147,8 @@ local function selectOwnTab()
 
 	-- Keep Blizzard's commodity buy page shown underneath the custom tab so
 	-- its protected Buy button is visible to the secure proxy.
-	local nativeMode = _G.AuctionHouseFrameDisplayMode and _G.AuctionHouseFrameDisplayMode.CommoditiesBuy
-	if nativeMode then
-		ah:SetDisplayMode(nativeMode)
-	else
-		ah:SetDisplayMode({})
-		ah.displayMode = nil
-	end
+	if ns.buyFrame then ns.buyFrame:Show() end
+	ns.EnsureCommodityPage()
 
 	local tabs = ah.Tabs or {}
 	for index = 1, #tabs do
