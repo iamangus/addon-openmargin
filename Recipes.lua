@@ -182,6 +182,19 @@ local function captureRequirements(recipeID)
 	return requirements
 end
 
+-- The client's own "where is this learned" text, e.g. Trainer or Vendor.
+local function captureRecipeSourceText(recipeID)
+	if not _G.C_TradeSkillUI or type(_G.C_TradeSkillUI.GetRecipeSourceText) ~= "function" then
+		return nil
+	end
+	local ok, text = pcall(_G.C_TradeSkillUI.GetRecipeSourceText, recipeID)
+	if ok and type(text) == "string" then
+		text = ns.Trim(text)
+		if text ~= "" then return text end
+	end
+	return nil
+end
+
 -- Account-wide availability: a requirement counts as met if any captured
 -- character met it. Requirements are keyed by their display text.
 local function mergeRequirements(existing, current)
@@ -212,6 +225,13 @@ function ns.BuildRecipeRecord(recipeID, recipeInfo, schematic, professionID, pro
 		outputMax = (schematic and schematic.quantityMax) or (schematic and schematic.quantityMin) or 1,
 		recipeType = schematic and schematic.recipeType,
 		sourceType = recipeInfo and recipeInfo.sourceType or (existing and existing.sourceType),
+		sourceText = captureRecipeSourceText(recipeID) or (existing and existing.sourceText),
+		requiredSkill = tonumber(recipeInfo and (recipeInfo.requiredSkill or recipeInfo.requiredSkillRank
+			or recipeInfo.minSkill or recipeInfo.skillRequired)) or (existing and existing.requiredSkill),
+		requiredSkillName = (recipeInfo and (recipeInfo.requiredSkillName or recipeInfo.skillLineName))
+			or (existing and existing.requiredSkillName),
+		disabled = (recipeInfo and recipeInfo.disabled == true) or (existing and existing.disabled == true) or nil,
+		disabledReason = (recipeInfo and recipeInfo.disabledReason) or (existing and existing.disabledReason),
 		requirements = mergeRequirements(existing and existing.requirements, captureRequirements(recipeID)),
 		recipeItemID = existing and existing.recipeItemID,
 		reagents = {},

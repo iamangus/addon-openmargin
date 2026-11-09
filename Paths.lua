@@ -393,6 +393,116 @@ function ns.BuildCraftPath(recipeID, ctx, depth)
 	return path
 end
 
+function ns.ParseRequiredSkillText(text, professionName)
+	if type(text) ~= "string" or text == "" then return nil end
+	local lower = text:lower()
+	local profession = professionName and tostring(professionName):lower() or nil
+	if profession and profession ~= "" then
+		if not lower:find(profession, 1, true) then return nil end
+	elseif not lower:find("requires", 1, true) then
+		return nil
+	end
+	local number = text:match("%((%d+)%)") or text:match("(%d+)")
+	number = tonumber(number)
+	if number and number > 0 and number <= 1000 then return number end
+	return nil
+end
+
+function ns.GetTooltipRequiredSkill(data, professionName)
+	if type(data) ~= "table" or type(data.lines) ~= "table" then return nil end
+	for index = 1, #data.lines do
+		local line = data.lines[index]
+		if type(line) == "table" then
+			local skill = ns.ParseRequiredSkillText(line.leftText, professionName)
+				or ns.ParseRequiredSkillText(line.rightText, professionName)
+			if skill then return skill end
+		end
+	end
+	return nil
+end
+
+-- The required skill is not in TradeSkillRecipeInfo. Recipe items carry it in
+-- their tooltip ("Requires Enchanting (75)"), and so does the recipe spell.
+function ns.GetItemRequiredSkill(itemID, professionName)
+	if not itemID or itemID <= 0 then return nil end
+	local api = _G.C_TooltipInfo
+	if not api or type(api.GetItemByID) ~= "function" then return nil end
+	ns.GetItemInfo(itemID)
+	local ok, data = pcall(api.GetItemByID, itemID)
+	if not ok then return nil end
+	return ns.GetTooltipRequiredSkill(data, professionName)
+end
+
+function ns.GetSpellRequiredSkill(recipeID, professionName)
+	if not recipeID then return nil end
+	local api = _G.C_TooltipInfo
+	if not api or type(api.GetSpellByID) ~= "function" then return nil end
+	local ok, data = pcall(api.GetSpellByID, recipeID)
+	if not ok then return nil end
+	return ns.GetTooltipRequiredSkill(data, professionName)
+end
+
+function ns.GetPathRequiredSkill(recipeID, record)
+	if not record then return nil end
+
+	local trainer = ns.db and ns.db.trainerSkillReq and ns.db.trainerSkillReq[recipeID]
+	if trainer and tonumber(trainer.skill) and tonumber(trainer.skill) > 0 then
+		return tonumber(trainer.skill), trainer.name or record.professionName
+	end
+
+	local skill = tonumber(record.requiredSkill)
+	if skill and skill > 0 then
+		return skill, record.requiredSkillName or record.professionName
+	end
+
+	local item = ns.db and ns.db.recipeItems and ns.db.recipeItems[recipeID]
+	if item and item.itemID then
+		skill = ns.GetItemRequiredSkill(item.itemID, record.professionName)
+		if skill then
+			record.requiredSkill = skill
+			record.requiredSkillName = record.professionName
+			return skill, record.professionName
+		end
+	end
+
+	-- Building spell tooltips is comparatively expensive. Cache both success
+	-- and failure so a survey does not rebuild them for every refresh.
+	if not (record.requiredSkillMissingAt and (time() - record.requiredSkillMissingAt) < 86400) then
+		skill = ns.GetSpellRequiredSkill(recipeID, record.professionName)
+		if skill then
+			record.requiredSkill = skill
+			record.requiredSkillName = record.professionName
+			return skill, record.professionName
+		end
+		record.requiredSkillMissingAt = time()
+	end
+
+	skill = ns.ParseRequiredSkillText(record.disabledReason, record.professionName)
+	if skill then return skill, record.professionName end
+	local requirements = record.requirements
+	if requirements then
+		for index = 1, #requirements do
+			skill = ns.ParseRequiredSkillText(requirements[index].name, record.professionName)
+			if skill then return skill, record.professionName end
+		end
+	end
+	return nil
+end
+
+function ns.GetPathSourceLabel(recipeID, record)
+	if ns.db then
+		if ns.db.trainerSkillReq and ns.db.trainerSkillReq[recipeID] then return "Trainer" end
+		if ns.db.trainerCosts and ns.db.trainerCosts[recipeID] then return "Trainer" end
+		if (ns.db.recipeItems and ns.db.recipeItems[recipeID]) or (record and record.recipeItemID) then
+			return "Recipe item"
+		end
+	end
+	if record and record.sourceText and record.sourceText ~= "" then
+		return tostring(record.sourceText)
+	end
+	return nil
+end
+
 function ns.GetPathAvailability(recipeID, record)
 	local characters = ns.GetRecipeCharacters(recipeID)
 	if #characters > 0 then
@@ -411,6 +521,14 @@ function ns.GetPathAvailability(recipeID, record)
 			return "obtain", "Not learned"
 		end
 		return "missing", "No character has " .. tostring(record and record.professionName or "this profession")
+	end
+
+	local requiredSkill, requiredName = ns.GetPathRequiredSkill(recipeID, record)
+	if requiredSkill and best and (tonumber(best.skill) or 0) < requiredSkill then
+		return "skill", string.format("Requires %s %d · current %d",
+			tostring(requiredName or record.professionName or "skill"),
+			requiredSkill,
+			tonumber(best.skill) or 0)
 	end
 
 	local unmet = {}
@@ -518,6 +636,9 @@ function ns.EvaluateRecipePath(recipeID, ctxBest, ctxBuy)
 
 	local availability, availabilityText = ns.GetPathAvailability(recipeID, record)
 	local mine = ns.AccountHasProfession(record.professionID) or #ns.GetRecipeCharacters(recipeID) > 0
+	local requiredSkill, requiredName = ns.GetPathRequiredSkill(recipeID, record)
+	local sourceLabel = ns.GetPathSourceLabel(recipeID, record)
+	local bestCharacter = ns.GetBestProfessionCharacter(record.professionID)
 	local unlockCost, unlockLabel = ns.GetPathUnlockCost(recipeID, record)
 	local payback
 	if unlockCost and best.profit > 0 then
@@ -530,6 +651,10 @@ function ns.EvaluateRecipePath(recipeID, ctxBest, ctxBuy)
 		name = record.name or ns.GetItemName(record.outputItemID),
 		mine = mine,
 		professionID = record.professionID,
+		requiredSkill = requiredSkill,
+		requiredSkillName = requiredName,
+		currentSkill = bestCharacter and tonumber(bestCharacter.skill) or nil,
+		sourceLabel = sourceLabel,
 		professionName = record.professionName,
 		outputQty = econ.outputQty,
 		cost = econ.cost,
@@ -654,7 +779,10 @@ function ns.LearnRecipeItem(itemID, minPrice)
 		ns.db.recipes[spellID] = record
 		ns.AddRecipeToIndex(record)
 	end
-	if record then record.recipeItemID = itemID end
+	if record then
+		record.recipeItemID = itemID
+		record.requiredSkillMissingAt = nil
+	end
 	return true
 end
 
@@ -1034,16 +1162,24 @@ local function updatePathRow(row, data)
 	row.profit:SetTextColor(pr, pg, pb)
 	row.margin:SetText(string.format("%s  ·  %s", ns.FormatPercent(data.margin, true), ns.FormatMoney(data.cost)))
 
-	local text = tostring(data.professionName or "?")
+	local parts = { tostring(data.professionName or "?") }
+	if data.sourceLabel then parts[#parts + 1] = data.sourceLabel end
+	if data.requiredSkill then
+		if data.currentSkill then
+			parts[#parts + 1] = string.format("req %d (you %d)", data.requiredSkill, data.currentSkill)
+		else
+			parts[#parts + 1] = string.format("req %d", data.requiredSkill)
+		end
+	end
 	if data.saving and data.saving > 0 then
-		text = text .. " · chain saves " .. ns.FormatMoney(data.saving)
+		parts[#parts + 1] = "chain saves " .. ns.FormatMoney(data.saving)
 	else
-		text = text .. " · buy materials"
+		parts[#parts + 1] = "buy materials"
 	end
 	if data.availabilityText and data.availabilityText ~= "" and data.availability ~= "ready" then
-		text = text .. " · " .. data.availabilityText
+		parts[#parts + 1] = data.availabilityText
 	end
-	row.detail:SetText(text)
+	row.detail:SetText(table.concat(parts, " · "))
 
 	if ns.paths.selected and ns.paths.selected.recipeID == data.recipeID then
 		row.background:SetColorTexture(0.2, 0.8, 0.5, 0.14)
@@ -1125,6 +1261,21 @@ function ns.RefreshPathDetails()
 		ns.FormatMoney(data.cost),
 		data.buyCost and ns.FormatMoney(data.buyCost) or "?",
 		(data.saving or 0) > 0 and ("chain saves " .. ns.FormatMoney(data.saving)) or "no cheaper chain")
+	local requirementBits = {}
+	if data.sourceLabel then requirementBits[#requirementBits + 1] = "Source: " .. data.sourceLabel end
+	if data.requiredSkill then
+		requirementBits[#requirementBits + 1] = string.format("Requires %s %d",
+			tostring(data.requiredSkillName or data.professionName or "skill"), data.requiredSkill)
+		if data.currentSkill then
+			requirementBits[#requirementBits + 1] = string.format("you %d", data.currentSkill)
+		end
+	end
+	if not data.requiredSkill and data.availability ~= "ready" then
+		requirementBits[#requirementBits + 1] = "level not captured yet (open the trainer once)"
+	end
+	if #requirementBits > 0 then
+		lines[#lines + 1] = table.concat(requirementBits, " · ")
+	end
 	if data.unlockCost then
 		local payback = data.payback and string.format(" · pays back in %d craft%s", data.payback, data.payback == 1 and "" or "s") or ""
 		lines[#lines + 1] = string.format("Unlock: %s %s%s", data.unlockLabel or "Recipe", ns.FormatMoney(data.unlockCost), payback)

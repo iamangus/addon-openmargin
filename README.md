@@ -215,6 +215,12 @@ shows the chosen exit (**AH**, **DE** or **Vendor**), cost, profit and margin,
 and expanding it shows the full step-by-step chain with the profession and
 character needed at each step.
 
+Each row also shows the profession level the recipe needs and where it comes
+from: **Trainer**, **Recipe item**, vendor, drop or quest. Trainer levels are
+captured when that trainer is open. Recipe-item levels are read from the
+recipe item's tooltip. A row that has neither says the level was not captured
+yet.
+
 **Availability**
 
 - **Known** — a character on the account has learned the recipe.
