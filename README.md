@@ -115,10 +115,16 @@ One click is still required per purchase, and the AH holds one commodity
 purchase at a time. **Remaining** is the budget minus what this order has spent;
 **Reset** gives it a fresh budget.
 
-Set **Buy key** (for example `F8`) to bind a keyboard key to the selected Buy
-row while the Buy Orders tab is open. Use the **Key** checkbox on a row to
-choose which order the key triggers. Use a key you do not type into the fields;
-the binding is cleared when the tab closes.
+Set **Buy key** (for example `F8`) to bind a keyboard key to the checked Buy
+rows while the Buy Orders tab is open. Check **Key** on one or more rows; the
+key cycles through them in list order. After a successful purchase the same
+order keeps the key for 4 more attempts, so a restock is chased before moving
+on. The line under the key field shows the order the key will use next, plus
+how many attempts remain. Use a key you do not type into the fields; the
+binding is cleared when the tab closes.
+
+**Remaining** also shows the lowest unit quote that order has received
+(`· low 12c`). **Reset** clears it along with the spent budget.
 
 Purchases go to your mailbox, as with a normal Auction House purchase.
 

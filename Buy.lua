@@ -780,6 +780,13 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	local rule = pending.rule
 	local state = ns.GetBuyState(rule)
 
+	-- Remember the cheapest quote this order has seen. It is cleared by Reset.
+	if not rule.lowQuote or unitPrice < rule.lowQuote then
+		rule.lowQuote = unitPrice
+		rule.lowQuoteAt = time()
+		rule.lowQuoteQuantity = plan.quantity
+	end
+
 	local remaining = ns.GetBuyRemaining(rule)
 	local money = ns.GetBuyMoney()
 
@@ -842,6 +849,7 @@ end
 function ns.HandleCommodityUnavailable()
 	local pending = ns.buyPending
 	if not pending or pending.phase ~= "quote" then return end
+	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule) end
 	log("commodity price unavailable itemID=%s", tostring(pending.rule.itemID))
 	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -871,6 +879,7 @@ function ns.HandlePurchaseSucceeded()
 
 	rule.spent = (tonumber(rule.spent) or 0) + cost
 	ns.buyPending = nil
+	if ns.AdvanceBuyKeyCycle then ns.AdvanceBuyKeyCycle(rule) end
 	state.phase = "idle"
 	state.plan = nil
 	state.armedPlan = nil
@@ -894,6 +903,12 @@ end
 function ns.HandlePurchaseFailed()
 	local pending = ns.buyPending
 	if not pending then return end
+	-- A failed buy is an attempt on this order; use up one sticky slot so the
+	-- key moves on after a few misses.
+	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule) end
+	if ns.buyKeySticky and ns.buyKeySticky.rule == pending.rule then
+		ns.buyKeySticky.remaining = 0
+	end
 	local rule = pending.rule
 	log("purchase failed itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
@@ -1278,6 +1293,9 @@ function ns.ResetBuyBudget(rule)
 	local state = ns.GetBuyState(rule)
 	if ns.buyPending and ns.buyPending.rule == rule then return end
 	rule.spent = 0
+	rule.lowQuote = nil
+	rule.lowQuoteAt = nil
+	rule.lowQuoteQuantity = nil
 	state.phase = "idle"
 	state.plan = nil
 	if state.armedPlan then
@@ -1390,11 +1408,11 @@ function ns.UpdateBuyRow(row)
 	end
 
 	local remaining = ns.GetBuyRemaining(rule)
-	if rule.budgetLimit then
-		row.remaining:SetText(ns.FormatMoneyFull(remaining) .. " left")
-	else
-		row.remaining:SetText("no budget")
+	local remainingText = rule.budgetLimit and (ns.FormatMoneyFull(remaining) .. " left") or "no budget"
+	if rule.lowQuote then
+		remainingText = remainingText .. " · low " .. ns.FormatMoney(rule.lowQuote)
 	end
+	row.remaining:SetText(remainingText)
 	if not row.quantityBox:HasFocus() then
 		local quantityText = tostring(ns.GetBuyQuantity(rule))
 		if row.quantityBox:GetText() ~= quantityText then row.quantityBox:SetText(quantityText) end
@@ -1480,45 +1498,115 @@ function ns.UpdateBuyRow(row)
 	ns.UpdateBuyKeyButton()
 end
 
-function ns.SetBuyKeyRule(rule)
-	if not ns.db then return end
-	local orders = ns.db.buyOrders or {}
+-- The Buy key can target several orders. They cycle in list order; after a
+-- successful purchase the same order keeps the key for the next few attempts
+-- so a restock is chased before moving on.
+local KEY_STICKY_ATTEMPTS = 4
+
+function ns.GetKeyTargetRules()
+	local rules = {}
+	local orders = ns.db and ns.db.buyOrders or {}
 	for index = 1, #orders do
-		orders[index].keyTarget = orders[index] == rule
+		if orders[index].keyTarget == true then rules[#rules + 1] = orders[index] end
 	end
+	return rules
+end
+
+function ns.SetBuyKeyRule(rule, selected)
+	if not ns.db then return end
+	if selected == nil then selected = true end
+	if rule then rule.keyTarget = selected == true end
 	ns.RefreshBuyFrame()
 	ns.UpdateBuyKeyButton()
 end
 
+local function isBuyRuleReady(rule)
+	if type(rule) ~= "table" or rule.removed then return false end
+	local state = ns.GetBuyState(rule)
+	return state and state.phase == "ready" and state.plan ~= nil
+end
+
 function ns.GetBuyKeyRow()
-	local rows = ns.buyRows or {}
-	local selected
-	for index = 1, #rows do
-		local row = rows[index]
-		local rule = row and row.rule
-		if type(rule) == "table" and rule.keyTarget then
-			selected = row
-			break
-		end
-	end
-	if selected then
-		local state = ns.GetBuyState(selected.rule)
-		if state and state.phase == "ready" and state.plan then
-			return selected
-		end
-		return nil
-	end
-	for index = 1, #rows do
-		local row = rows[index]
-		local rule = row and row.rule
-		if type(rule) == "table" then
-			local state = ns.GetBuyState(rule)
-			if state and state.phase == "ready" and state.plan then
-				return row
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then return nil end
+
+	local sticky = ns.buyKeySticky
+	if sticky and sticky.rule and sticky.remaining > 0 and isBuyRuleReady(sticky.rule) then
+		for index = 1, #targets do
+			if targets[index] == sticky.rule then
+				ns.buyKeyCycleIndex = index
+				break
 			end
+		end
+		local state = ns.GetBuyState(sticky.rule)
+		return state.row
+	end
+
+	local startIndex = (ns.buyKeyCycleIndex or 0) % #targets + 1
+	for offset = 0, #targets - 1 do
+		local index = (startIndex - 1 + offset) % #targets + 1
+		local rule = targets[index]
+		if isBuyRuleReady(rule) then
+			ns.buyKeyCycleIndex = index
+			local state = ns.GetBuyState(rule)
+			return state.row
 		end
 	end
 	return nil
+end
+
+-- After a successful purchase the same order keeps the key for the next few
+-- attempts, so a restock is chased before the key moves on.
+function ns.AdvanceBuyKeyCycle(successfulRule)
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then return end
+
+	local index
+	for lookup = 1, #targets do
+		if targets[lookup] == successfulRule then
+			index = lookup
+			break
+		end
+	end
+	if not index then return end
+
+	successfulRule.keyStickyLeft = KEY_STICKY_ATTEMPTS
+	ns.buyKeySticky = {
+		rule = successfulRule,
+		remaining = KEY_STICKY_ATTEMPTS,
+		position = index,
+	}
+	ns.buyKeyCycleIndex = index
+end
+
+function ns.ConsumeBuyKeySticky(rule)
+	local sticky = ns.buyKeySticky
+	if not sticky or sticky.rule ~= rule then return end
+	sticky.remaining = sticky.remaining - 1
+	if rule.keyStickyLeft then rule.keyStickyLeft = rule.keyStickyLeft - 1 end
+	if sticky.remaining > 0 then return end
+
+	-- Stickiness is spent: move the key to the next checked order.
+	ns.buyKeySticky = nil
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then return end
+	local position = sticky.position or ns.buyKeyCycleIndex or 1
+	ns.buyKeyCycleIndex = position % #targets + 1
+end
+
+function ns.GetBuyKeyLabel()
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then return "no key target" end
+	local row = ns.buyKeyRow
+	local name = row and row.rule and (ns.GetBuyItemDisplay(row.rule.itemID) or row.rule.itemName)
+	if targets and #targets > 1 then
+		local sticky = ns.buyKeySticky
+		if sticky and sticky.remaining > 0 then
+			return string.format("%s (+%d)", tostring(name or "?"), sticky.remaining)
+		end
+		return string.format("%s (1/%d)", tostring(name or "?"), #targets)
+	end
+	return tostring(name or "?")
 end
 
 function ns.UpdateBuyKeyButton()
@@ -1527,6 +1615,7 @@ function ns.UpdateBuyKeyButton()
 	if ns.buyPending then
 		button:SetAttribute("clickbutton", nil)
 		button:Disable()
+		ns.UpdateBuyKeyStatus()
 		return
 	end
 	local row = ns.GetBuyKeyRow()
@@ -1535,6 +1624,7 @@ function ns.UpdateBuyKeyButton()
 	if not row or not state or state.phase ~= "ready" or not state.plan then
 		button:SetAttribute("clickbutton", nil)
 		button:Disable()
+		ns.UpdateBuyKeyStatus()
 		return
 	end
 	if ns.armedBuyRule ~= row.rule or state.armedPlan ~= state.plan then
@@ -1542,6 +1632,29 @@ function ns.UpdateBuyKeyButton()
 	end
 	button:SetAttribute("clickbutton", nil)
 	button:Enable()
+	ns.UpdateBuyKeyStatus()
+end
+
+function ns.UpdateBuyKeyStatus()
+	local label = ns.buyKeyStatus
+	if not label then return end
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then
+		label:SetText("")
+		return
+	end
+	local row = ns.buyKeyRow
+	local name = row and row.rule and (ns.GetBuyItemDisplay(row.rule.itemID) or row.rule.itemName) or "nothing ready"
+	local sticky = ns.buyKeySticky
+	if sticky and sticky.remaining > 0 then
+		label:SetText(string.format("Key: %s x%d", tostring(name), sticky.remaining + 1))
+		return
+	end
+	local position
+	if ns.buyKeyCycleIndex and #targets > 0 then
+		position = ns.buyKeyCycleIndex
+	end
+	label:SetText(string.format("Key: %s%s", tostring(name), position and string.format(" (%d/%d)", position, #targets) or ""))
 end
 
 function ns.ClearBuyKeyBinding()
@@ -1582,11 +1695,14 @@ local function createRow(parent)
 	row.keyCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
 	row.keyCheck:SetSize(18, 18)
 	row.keyCheck:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 8, 4)
-	row.keyCheck:SetScript("OnClick", function() ns.SetBuyKeyRule(row.rule) end)
+	row.keyCheck:SetScript("OnClick", function(self)
+		ns.SetBuyKeyRule(row.rule, self:GetChecked() == true)
+	end)
 	row.keyCheck:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:AddLine("Use for Buy key")
-		GameTooltip:AddLine("This order is the one the Buy key triggers.", 1, 1, 1, true)
+		GameTooltip:AddLine("Checked orders are triggered by the Buy key, one after another.", 1, 1, 1, true)
+		GameTooltip:AddLine("After a successful buy the same order keeps the key for 4 more attempts.", 0.8, 0.8, 0.8, true)
 		GameTooltip:Show()
 	end)
 	row.keyCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1821,6 +1937,11 @@ function ns.CreateBuyFrame(ah)
 	keyLabel:SetPoint("RIGHT", keyBox, "LEFT", -6, 0)
 	keyLabel:SetText("Buy key:")
 	ns.buyKeyLabel = keyLabel
+
+	local keyStatus = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	keyStatus:SetPoint("LEFT", keyLabel, "LEFT", 0, -14)
+	keyStatus:SetTextColor(0.75, 0.75, 0.75)
+	ns.buyKeyStatus = keyStatus
 
 	local headers = {
 		{ text = "Key", x = 6, width = 24 },
