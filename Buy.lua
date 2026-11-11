@@ -165,6 +165,15 @@ local function itemEnum()
 	return _G.Enum and _G.Enum.ItemCommodityStatus and _G.Enum.ItemCommodityStatus.Item or 1
 end
 
+-- Quotes arrive as averages and can be fractional. Copper is whole units, so
+-- round down to the price the sale actually charges.
+function ns.WholeCopper(value)
+	value = tonumber(value)
+	if not value then return nil end
+	if value < 0 then value = 0 end
+	return math.floor(value)
+end
+
 function ns.GetBuyState(rule)
 	if not rule then return nil end
 	ns.buyRuntime = ns.buyRuntime or {}
@@ -780,11 +789,16 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	local rule = pending.rule
 	local state = ns.GetBuyState(rule)
 
-	-- Remember the cheapest quote this order has seen. It is cleared by Reset.
-	if not rule.lowQuote or unitPrice < rule.lowQuote then
-		rule.lowQuote = unitPrice
+	-- Remember the cheapest quote this order has seen. The quote is an average
+	-- that can be fractional, so store whole copper: a 2s53c quote must not be
+	-- remembered as 254c and shown as 3s. It is cleared by Reset.
+	local quoteUnit = ns.WholeCopper(unitPrice)
+	local quoteTotal = ns.WholeCopper(totalPrice)
+	if not rule.lowQuote or quoteUnit < rule.lowQuote then
+		rule.lowQuote = quoteUnit
 		rule.lowQuoteAt = time()
 		rule.lowQuoteQuantity = plan.quantity
+		rule.lowQuoteTotal = quoteTotal
 	end
 
 	local remaining = ns.GetBuyRemaining(rule)
@@ -792,10 +806,12 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 
 	-- plan.cost is only the preview. The live quote is allowed to spend more
 	-- than the preview as long as it stays under Max each and the real budget.
+	-- Compare whole copper so a 252.6c average is treated as 252c, matching
+	-- what the purchase charges and what the row shows.
 	local withinLimits =
-		unitPrice <= plan.maxUnit and
-		totalPrice <= remaining and
-		(not money or totalPrice <= money)
+		quoteUnit <= plan.maxUnit and
+		quoteTotal <= remaining and
+		(not money or quoteTotal <= money)
 	if ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
 		log("quote unit=%s total=%s max=%s planCost=%s remaining=%s money=%s within=%s", tostring(unitPrice), tostring(totalPrice), tostring(plan.maxUnit), tostring(plan.cost), tostring(remaining), tostring(money), tostring(withinLimits))
 	end
@@ -810,12 +826,12 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		state.armedPlan = nil
 		state.messageUntil = GetTime() + 10
 		local reason
-		if unitPrice > plan.maxUnit then
-			reason = string.format("quote %s each is above Max each %s", ns.FormatMoneyFull(unitPrice), ns.FormatMoneyFull(plan.maxUnit))
-		elseif totalPrice > remaining then
-			reason = string.format("quote total %s exceeds budget remaining %s", ns.FormatMoneyFull(totalPrice), ns.FormatMoneyFull(remaining))
+		if quoteUnit > plan.maxUnit then
+			reason = string.format("quote %s each is above Max each %s", ns.FormatMoneyFull(quoteUnit), ns.FormatMoneyFull(plan.maxUnit))
+		elseif quoteTotal > remaining then
+			reason = string.format("quote total %s exceeds budget remaining %s", ns.FormatMoneyFull(quoteTotal), ns.FormatMoneyFull(remaining))
 		else
-			reason = string.format("quote total %s exceeds your money", ns.FormatMoneyFull(totalPrice))
+			reason = string.format("quote total %s exceeds your money", ns.FormatMoneyFull(quoteTotal))
 		end
 		state.status = reason .. " - click Buy to try again"
 		ns.Print("Buy Orders: " .. reason .. ".")
@@ -825,8 +841,8 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	end
 
 	pending.phase = "buy"
-	pending.actualCost = totalPrice
-	pending.unitPrice = unitPrice
+	pending.actualCost = quoteTotal
+	pending.unitPrice = quoteUnit
 	state.phase = "buying"
 	state.status = "Buying..."
 
@@ -1410,7 +1426,7 @@ function ns.UpdateBuyRow(row)
 	local remaining = ns.GetBuyRemaining(rule)
 	local remainingText = rule.budgetLimit and (ns.FormatMoneyFull(remaining) .. " left") or "no budget"
 	if rule.lowQuote then
-		remainingText = remainingText .. " · low " .. ns.FormatMoney(rule.lowQuote)
+		remainingText = remainingText .. " · low " .. ns.FormatMoneyFull(rule.lowQuote)
 	end
 	row.remaining:SetText(remainingText)
 	if not row.quantityBox:HasFocus() then
