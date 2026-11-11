@@ -147,6 +147,173 @@ function ns.ResolveBuyItemID(text)
 	return nil
 end
 
+-- Item name lookup for typed names. The client has no item-name index, so the
+-- Auction House browse query does the search ("Copper Ore" also finds the
+-- exact name when a multi-word name is trimmed word by word).
+function ns.NormalizeItemName(text)
+	return ns.Normalize(text):gsub("%s+", " ")
+end
+
+-- Resolve a typed item name to one or (when ambiguous) several candidates.
+-- Returns a list of { itemID, name } and the query tried.
+function ns.FindBuyItemCandidates(text)
+	text = ns.Trim(text)
+	if text == "" then return {}, nil end
+
+	-- Whole-string matches first: the item cache and our own names.
+	local wanted = ns.NormalizeItemName(text)
+	local map = ns.BuildItemNameMap and ns.BuildItemNameMap()
+	local results = {}
+	local seen = {}
+	local function push(itemID)
+		itemID = tonumber(itemID)
+		if itemID and itemID > 0 and not seen[itemID] then
+			seen[itemID] = true
+			results[#results + 1] = { itemID = itemID, name = ns.GetBuyItemDisplay(itemID) }
+		end
+	end
+	if map and map[wanted] then push(map[wanted]) end
+
+	-- Name search over the player's cached item data.
+	if _G.ItemSearch_AddItem and type(_G.ItemSearch_AddItem) == "function" then
+		local tokens = {}
+		for word in wanted:gmatch("%S+") do tokens[#tokens + 1] = word end
+		local ok = pcall(function()
+			ClearItemSearch()
+			for index = 1, #tokens do ItemSearch_AddItem(tokens[index]) end
+			local count = GetNumItemSearchResults()
+			for index = 1, math.min(count or 0, 50) do
+				local link = GetItemSearchResult(index)
+				local itemID = link and ns.GetItemIDFromLink(link)
+				if itemID then push(itemID) end
+			end
+		end)
+		if not ok and _G.ClearItemSearch then pcall(_G.ClearItemSearch) end
+	end
+
+	return results, text
+end
+
+-- Auction House browse search used when the item is not in the local cache.
+function ns.StartBuyItemLookup(row, text)
+	local api = _G.C_AuctionHouse
+	if not api or type(api.SendBrowseQuery) ~= "function" then
+		if row.rule then ns.GetBuyState(row.rule).status = "Unknown item" end
+		ns.UpdateBuyRow(row)
+		return false
+	end
+	if not _G.AuctionHouseFrame or not _G.AuctionHouseFrame:IsShown() then
+		if row.rule then
+			ns.GetBuyState(row.rule).status = "Open the Auction House to look up that name"
+		end
+		ns.UpdateBuyRow(row)
+		return false
+	end
+
+	ns.buyLookup = {
+		row = row,
+		query = text,
+		startedAt = GetTime(),
+	}
+	local ok = pcall(api.SendBrowseQuery, {
+		searchString = text,
+		filters = {},
+		itemClassFilters = {},
+		sorts = SORTS,
+	})
+	if not ok then
+		ns.buyLookup = nil
+		if row.rule then ns.GetBuyState(row.rule).status = "Item lookup failed" end
+		ns.UpdateBuyRow(row)
+		return false
+	end
+	if row.rule then ns.GetBuyState(row.rule).status = "Looking up item..." end
+	ns.UpdateBuyRow(row)
+	return true
+end
+
+local function applyPurchasableItem(row, itemID)
+	local rule = row and row.rule
+	if not rule or not itemID then return end
+	local status = ns.GetCommodityStatus(itemID)
+	local purchaseStatus = ns.GetCommodityPurchaseStatus(itemID)
+	if status and status ~= itemEnum() then
+		ns.GetBuyState(rule).status = "Only commodities can be blind bought"
+		return
+	end
+	if purchaseStatus and ns.purchaseStatusEnum and purchaseStatus ~= ns.purchaseStatusEnum() then
+		ns.GetBuyState(rule).status = "Nothing listed for that item right now"
+		return
+	end
+	if rule.itemID ~= itemID then rule.spent = 0 end
+	rule.itemID = itemID
+	rule.itemName = ns.GetBuyItemDisplay(itemID)
+	local state = ns.GetBuyState(rule)
+	state.phase = "idle"
+	state.plan = nil
+	state.status = "Click Buy"
+end
+
+function ns.FinishBuyItemLookup()
+	local lookup = ns.buyLookup
+	if not lookup then return end
+	local api = _G.C_AuctionHouse
+	if not api or type(api.GetBrowseResults) ~= "function" then return end
+
+	local ok, results = pcall(api.GetBrowseResults)
+	if not ok or type(results) ~= "table" then results = {} end
+	if #results == 0 and (GetTime() - (lookup.startedAt or 0)) < 2 then
+		ns.After(0.5, ns.FinishBuyItemLookup)
+		return
+	end
+
+	ns.buyLookup = nil
+	local row = lookup.row
+	if not row or not row.rule then return end
+
+	local wanted = ns.NormalizeItemName(lookup.query)
+	local exact, partial, seen = nil, {}, {}
+	for index = 1, #results do
+		local itemKey = results[index].itemKey
+		local itemID = itemKey and tonumber(itemKey.itemID)
+		if itemID and itemID > 0 and not seen[itemID] then
+			seen[itemID] = true
+			local name = ns.GetBuyItemDisplay(itemID)
+			local normalized = ns.NormalizeItemName(name)
+			if normalized == wanted then
+				exact = itemID
+				break
+			elseif normalized:sub(1, #wanted) == wanted then
+				partial[#partial + 1] = { itemID = itemID, name = name }
+			end
+		end
+	end
+
+	if not exact and #partial == 1 then exact = partial[1].itemID end
+	if exact then
+		applyPurchasableItem(row, exact)
+	elseif #partial > 1 then
+		ns.Print("Buy Orders: several items match \"" .. lookup.query .. "\": "
+			.. partial[1].name .. ", " .. partial[2].name .. ". Shift-click the one you want.")
+		ns.GetBuyState(row.rule).status = "Several items match - shift-click one"
+	else
+		ns.GetBuyState(row.rule).status = "No listed auction matches that name"
+	end
+	ns.UpdateBuyRow(row)
+end
+
+function ns.GetCommodityPurchaseStatus(itemID)
+	if not itemID or not _G.C_AuctionHouse or type(_G.C_AuctionHouse.GetItemCommodityPurchaseStatus) ~= "function" then
+		return nil
+	end
+	if not _G.ItemLocation or type(_G.ItemLocation.CreateFromItemID) ~= "function" then return nil end
+	local ok, location = pcall(_G.ItemLocation.CreateFromItemID, _G.ItemLocation, itemID)
+	if not ok or not location then return nil end
+	local statusOk, status = pcall(_G.C_AuctionHouse.GetItemCommodityPurchaseStatus, location)
+	if not statusOk then return nil end
+	return status
+end
+
 function ns.GetCommodityStatus(itemID)
 	if not itemID or not _G.C_AuctionHouse or not _G.C_AuctionHouse.GetItemCommodityStatus then
 		return nil
@@ -163,6 +330,10 @@ end
 
 local function itemEnum()
 	return _G.Enum and _G.Enum.ItemCommodityStatus and _G.Enum.ItemCommodityStatus.Item or 1
+end
+
+function ns.purchaseStatusEnum()
+	return _G.Enum and _G.Enum.CommodityPurchaseStatus and _G.Enum.CommodityPurchaseStatus.Purchasable or 1
 end
 
 -- Quotes arrive as averages and can be fractional. Copper is whole units, so
@@ -1353,19 +1524,36 @@ function ns.CommitBuyRow(row)
 		if text ~= (rule.itemName or "") then
 			local itemID = ns.ResolveBuyItemID(text)
 			if itemID then
-				if itemID ~= rule.itemID then rule.spent = 0 end
-				rule.itemID = itemID
-				rule.itemName = ns.GetBuyItemDisplay(itemID)
+				applyPurchasableItem(row, itemID)
 				if not row.itemBox:HasFocus() then row.itemBox:SetText(rule.itemName) end
-				state.phase = "idle"
-				state.plan = nil
-				state.status = "Click Buy"
 			else
-				rule.itemID = nil
-				rule.itemName = text ~= "" and text or nil
-				state.phase = "idle"
-				state.plan = nil
-				state.status = text == "" and "Set an item" or "Unknown item"
+				local candidates = ns.FindBuyItemCandidates(text)
+				if #candidates == 1 then
+					applyPurchasableItem(row, candidates[1].itemID)
+					if not row.itemBox:HasFocus() then row.itemBox:SetText(rule.itemName) end
+				elseif #candidates > 1 then
+					rule.itemID = nil
+					rule.itemName = text ~= "" and text or nil
+					state.phase = "idle"
+					state.plan = nil
+					state.status = "Several items match - shift-click one"
+				elseif text ~= "" then
+					-- Keep the typed text so the row can resolve it once the
+					-- Auction House search comes back.
+					rule.itemID = nil
+					rule.itemName = text
+					state.phase = "idle"
+					state.plan = nil
+					if not ns.StartBuyItemLookup(row, text) and not state.status then
+						state.status = "Unknown item"
+					end
+				else
+					rule.itemID = nil
+					rule.itemName = nil
+					state.phase = "idle"
+					state.plan = nil
+					state.status = "Set an item"
+				end
 			end
 		end
 	end
@@ -1816,6 +2004,15 @@ local function createRow(parent)
 	row.maxBox:HookScript("OnEditFocusLost", commit)
 	row.budgetBox:HookScript("OnEditFocusLost", commit)
 	row.quantityBox:HookScript("OnEditFocusLost", commit)
+
+	row.itemBox:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Item")
+		GameTooltip:AddLine("Shift-click an item, type its exact name, or paste an item link.", 1, 1, 1, true)
+		GameTooltip:AddLine("Typed names are looked up in the Auction House, so open it first.", 0.8, 0.8, 0.8, true)
+		GameTooltip:Show()
+	end)
+	row.itemBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	row.itemBox:HookScript("OnEditFocusGained", function()
 		ns.focusedBuyItemBox = row.itemBox

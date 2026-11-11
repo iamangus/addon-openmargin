@@ -93,8 +93,10 @@ once so its full recipe list is captured.
 
 Open the Auction House and select the **Buy Orders** tab (or run `/om buy`).
 
-1. **New order**, then shift-click an item from your bags or chat to put its
-   name in the Item box.
+1. **New order**, then fill the Item box one of three ways: shift-click an item
+   from your bags or chat, paste an item link, or type the item's exact name.
+   Typed names are looked up through the Auction House, so open it first and
+   the row fills in when the search returns.
 2. Set **Max each** (for example `13c`), **Budget** (blank = use your available
    money) and **Qty** (how many units to request per purchase; default 20).
    Accepted money input includes `13c`, `10s`, `1g 5s`; bare numbers are copper.
