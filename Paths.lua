@@ -755,12 +755,25 @@ function ns.GetRecipeIDForRecipeItem(itemID)
 
 	local classID = ns.GetItemClassID(itemID)
 	if classID and classID ~= RECIPE_CLASS_ID then
-		ns.recipeItemLookup[itemID] = false
-		return nil
+		-- Fall back to the usual recipe item name prefixes for clients that
+		-- report an unexpected class. Localized names still pass the spell
+		-- check below when the class is correct.
+		local name = ns.GetItemName(itemID)
+		local looksLikeRecipe = type(name) == "string" and (
+			name:find("^Recipe:") or name:find("^Plans:") or name:find("^Pattern:")
+			or name:find("^Formula:") or name:find("^Schematic:") or name:find("^Design:")
+			or name:find("^Technique:")
+		)
+		if not looksLikeRecipe then
+			ns.recipeItemLookup[itemID] = false
+			return nil
+		end
 	end
-	if not classID then return nil end
 
+	-- The class can be nil while a bag/vendor item is still loading. The spell
+	-- lookup is cheap, so try it rather than giving up on the tooltip.
 	local recipeID = ns.GetRecipeSpellForItem(itemID)
+	if not recipeID and not classID then return nil end
 	ns.recipeItemLookup[itemID] = recipeID or false
 	return recipeID or nil
 end

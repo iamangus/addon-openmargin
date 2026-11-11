@@ -109,12 +109,17 @@ function ns.InstallTooltipHook()
 		end
 	end
 
-	if not ns.tooltipHooked and _G.GameTooltip then
+	-- Also hook the classic item tooltip event. Some bag, merchant and
+	-- Auction House paths do not fire the TooltipDataProcessor post-call.
+	if _G.GameTooltip and not ns.tooltipItemHook then
 		local ok = pcall(_G.GameTooltip.HookScript, _G.GameTooltip, "OnTooltipSetItem", function(tooltip)
 			local success, err = pcall(ns.OnItemTooltip, tooltip)
 			if not success then ns.ReportError(err) end
 		end)
-		if ok then ns.tooltipHooked = true end
+		if ok then
+			ns.tooltipItemHook = true
+			ns.tooltipHooked = true
+		end
 	end
 
 	if _G.GameTooltip and not ns.tooltipHideHooked then
