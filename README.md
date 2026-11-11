@@ -46,8 +46,9 @@ query the Auction House themselves when you click Scan.
   vendor sale on each trainer row, and how many crafts repay the training cost.
 - Auctionator price and age on item tooltips.
 - Recipe items anywhere — Auction House, vendors, bags, chat — show the
-  crafted item's **craft cost**, **vendor sell** and **Auctionator price**
-  (plus AH profit) on hover.
+  **cost of buying every reagent on the Auction House**, plus the crafted
+  item's **vendor sell** and **Auctionator price** (and AH profit) on hover.
+  This works from the item itself and does not require opening the profession.
 - **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
   price, a budget and a quantity per purchase, then click **Buy**. It starts a
   blind commodity purchase, checks the live quote against your limits, and
@@ -259,8 +260,9 @@ Auctionator still supplies the prices. It cannot enumerate items or map recipe
 items to recipes, so the recipe catalog comes from the addon's own capture and
 browse scan.
 
-Hover any recipe item — Auction House, vendor, bags or chat — to see what the
-item it teaches costs to craft, what it vendors for, and what it auctions for.
+Hover any recipe item — Auction House, vendor, bags or chat — to see what it
+costs to buy all of its reagents on the Auction House, what the crafted item
+vendors for, and what it auctions for.
 
 ## Buy order diagnostics
 

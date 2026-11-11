@@ -745,12 +745,118 @@ local function itemSpell(itemID)
 	if _G.C_Item and type(_G.C_Item.GetItemSpell) == "function" then
 		try(_G.C_Item.GetItemSpell, itemID)
 		if not spellID and link then try(_G.C_Item.GetItemSpell, link) end
+		if not spellID and _G.ItemLocation and _G.ItemLocation.CreateFromItemID then
+			local location = _G.ItemLocation.CreateFromItemID(itemID)
+			if location then try(_G.C_Item.GetItemSpell, location) end
+		end
+		if not spellID then try(_G.C_Item.GetItemSpell, { itemID = itemID }) end
+		if not spellID then
+			try(_G.C_Item.GetItemSpell, { itemID = itemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0, itemContext = 0 })
+		end
 	end
 	if not spellID and type(_G.GetItemSpell) == "function" then
 		if link then try(_G.GetItemSpell, link) end
 		if not spellID then try(_G.GetItemSpell, itemID) end
 	end
 	return spellName, spellID
+end
+
+function ns.GetItemSpellID(itemID)
+	if not itemID or itemID <= 0 then return nil end
+	local _, spellID = itemSpell(itemID)
+	return spellID
+end
+
+function ns.GetRecipeSchematicFor(recipeID)
+	if not recipeID or not _G.C_TradeSkillUI then return nil end
+	local getter = _G.C_TradeSkillUI.GetRecipeSchematic
+	if type(getter) ~= "function" then return nil end
+	local unpackFn = _G.unpack or (_G.table and _G.table.unpack)
+	local arguments = {
+		{ recipeID, false },
+		{ recipeID },
+		{ recipeID, 1 },
+	}
+	for index = 1, #arguments do
+		local ok, schematic = pcall(getter, unpackFn(arguments[index]))
+		if ok and type(schematic) == "table"
+			and (schematic.outputItemID or schematic.reagentSlotSchematics) then
+			return schematic
+		end
+	end
+	return nil
+end
+
+-- Build a recipe record straight from a recipe item. This deliberately does
+-- not depend on the profession window ever being opened.
+function ns.ResolveItemRecipe(itemID)
+	if not itemID or itemID <= 0 then return nil end
+	local spellID = ns.GetItemSpellID(itemID)
+	if not spellID then
+		if ns.BuyLog then ns.BuyLog("resolve item=%s no spell", tostring(itemID)) end
+		return nil
+	end
+
+	local record = ns.db and ns.db.recipes and ns.db.recipes[spellID]
+	if record and record.outputItemID and record.reagents and #record.reagents > 0 then
+		return record, spellID
+	end
+
+	local candidates = { spellID }
+	if _G.C_TradeSkillUI and type(_G.C_TradeSkillUI.GetRecipeInfo) == "function" then
+		local ok, info = pcall(_G.C_TradeSkillUI.GetRecipeInfo, spellID)
+		if ok and type(info) == "table" and tonumber(info.recipeID) and tonumber(info.recipeID) > 0
+			and tonumber(info.recipeID) ~= spellID then
+			candidates[#candidates + 1] = tonumber(info.recipeID)
+		end
+	end
+
+	for index = 1, #candidates do
+		local recipeID = candidates[index]
+		local schematic = ns.GetRecipeSchematicFor(recipeID)
+		if schematic then
+			local professionID, professionName
+			if _G.C_TradeSkillUI and type(_G.C_TradeSkillUI.GetProfessionInfoByRecipeID) == "function" then
+				local ok, info = pcall(_G.C_TradeSkillUI.GetProfessionInfoByRecipeID, recipeID)
+				if ok and type(info) == "table" then
+					professionID = info.professionID
+					professionName = info.professionName
+				end
+			end
+			local built = ns.BuildRecipeRecord(recipeID, nil, schematic, professionID, professionName)
+			ns.db.recipes[recipeID] = built
+			ns.AddRecipeToIndex(built)
+			if ns.MarkPathSurveyDirty then ns.MarkPathSurveyDirty() end
+			if ns.BuyLog then
+				ns.BuyLog("resolve item=%s recipe=%s reagents=%d", tostring(itemID), tostring(recipeID), #built.reagents)
+			end
+			return built, recipeID
+		end
+	end
+
+	if ns.BuyLog then ns.BuyLog("resolve item=%s recipe=%s no schematic", tostring(itemID), tostring(spellID)) end
+	return nil
+end
+
+-- Cost with every reagent bought on the Auction House: no vendor fallback and
+-- no intermediate crafts.
+function ns.GetAHCraftCost(recipeID, record)
+	if not recipeID and record then recipeID = record.id end
+	if not recipeID or not ns.db then return nil end
+	local settings = {}
+	for key, value in pairs(ns.db.settings or {}) do settings[key] = value end
+	settings.craftReagents = false
+	local ctx = ns.NewCostContext({
+		price = ns.GetPrice,
+		vendor = function() return nil end,
+		vendorSell = ns.GetVendorSellPrice,
+		recipes = ns.db.recipes,
+		byOutput = ns.byOutput,
+		known = function() return false end,
+		settings = settings,
+		maxDepth = 1,
+	})
+	return ns.GetCraftCost(recipeID, ctx)
 end
 
 function ns.GetRecipeSpellForItem(itemID)
@@ -823,18 +929,6 @@ function ns.GetRecipeIDForRecipeItem(itemID)
 	if not recipeID and not classID then return nil end
 	ns.recipeItemLookup[itemID] = recipeID or false
 	return recipeID or nil
-end
-
--- Account-wide economics for a recipe item tooltip. Cached per price epoch.
-function ns.GetRecipeTooltipEconomics(recipeID)
-	if not recipeID or not ns.db then return nil end
-	local epoch = ns.priceEpoch or 1
-	ns.recipeTooltipCache = ns.recipeTooltipCache or {}
-	local entry = ns.recipeTooltipCache[recipeID]
-	if entry and entry.epoch == epoch then return entry.econ end
-	local econ = ns.GetEconomics(recipeID, ns.BuildAccountContext(true))
-	ns.recipeTooltipCache[recipeID] = { epoch = epoch, econ = econ }
-	return econ
 end
 
 function ns.LearnRecipeItem(itemID, minPrice)
@@ -1048,7 +1142,6 @@ function ns.InvalidatePathSurvey()
 	ns.paths.dirty = true
 	ns.paths.survey = nil
 	ns.paths.rows = nil
-	ns.recipeTooltipCache = nil
 end
 
 function ns.GetPathTabCounts()

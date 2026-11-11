@@ -33,36 +33,25 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 	if not ns.db or not ns.db.settings.tooltips then return false end
 	if tooltip.OpenMarginRecipeItemID == itemID then return true end
 
-	local recipeID = ns.GetRecipeIDForRecipeItem and ns.GetRecipeIDForRecipeItem(itemID)
-	if not recipeID then return false end
-
-	local record = ns.db.recipes and ns.db.recipes[recipeID]
-	if not record and ns.LearnRecipeItem then
-		ns.LearnRecipeItem(itemID, nil)
-		record = ns.db.recipes and ns.db.recipes[recipeID]
-	end
-	if not record and ns.GetRecipeNameFromItem and ns.FindTrainerRecipe then
-		local name = ns.GetRecipeNameFromItem(itemID)
-		local byName = name and ns.FindTrainerRecipe(nil, name)
-		if byName then record = ns.db.recipes and ns.db.recipes[byName] end
-	end
-	if ns.BuyLog and ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
-		ns.BuyLog("recipe tooltip item=%s recipe=%s record=%s output=%s",
-			tostring(itemID), tostring(recipeID), tostring(record ~= nil),
-			tostring(record and record.outputItemID))
+	local record, recipeID = ns.ResolveItemRecipe and ns.ResolveItemRecipe(itemID)
+	if not record then
+		-- Older captures already hold the recipe; use them as a fallback.
+		recipeID = ns.GetRecipeIDForRecipeItem and ns.GetRecipeIDForRecipeItem(itemID)
+		record = recipeID and ns.db.recipes and ns.db.recipes[recipeID]
 	end
 	if not record or not record.outputItemID then
 		if ns.GetRecipeNameFromItem and ns.GetRecipeNameFromItem(itemID)
 			and tooltip.OpenMarginRecipeHintID ~= itemID then
 			tooltip.OpenMarginRecipeHintID = itemID
 			tooltip:AddLine(" ")
-			tooltip:AddLine("OpenMargin: recipe not captured yet (open the profession once)", 0.55, 0.55, 0.55)
+			tooltip:AddLine("OpenMargin: no recipe data for this item", 0.55, 0.55, 0.55)
 		end
 		return false
 	end
 
-	local econ = ns.GetRecipeTooltipEconomics and ns.GetRecipeTooltipEconomics(recipeID)
-	if not econ then return false end
+	recipeID = recipeID or record.id
+	local costInfo = ns.GetAHCraftCost and ns.GetAHCraftCost(recipeID, record)
+	if not costInfo then return false end
 
 	tooltip.OpenMarginRecipeItemID = itemID
 
@@ -70,27 +59,43 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 	tooltip:AddLine(" ")
 	tooltip:AddLine("OpenMargin · " .. outputName, 1, 0.82, 0)
 
-	if econ.cost then
-		local label = "Craft cost"
-		if econ.outputQty and econ.outputQty > 1 then
-			label = string.format("Craft cost (x%d)", econ.outputQty)
+	local costText = "—"
+	if costInfo.cost then
+		costText = costInfo.complete and ns.FormatMoneyFull(costInfo.cost) or "partial"
+	end
+	tooltip:AddDoubleLine("AH mats", costText, 0.8, 0.8, 0.8, 1, 1, 1)
+
+	if not costInfo.complete then
+		local missing
+		local details = costInfo.details or {}
+		for index = 1, #details do
+			if not details[index].unit then
+				missing = ns.GetItemName(details[index].itemID)
+				break
+			end
 		end
-		tooltip:AddDoubleLine(label, econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial",
-			0.8, 0.8, 0.8, 1, 1, 1)
+		if missing then
+			tooltip:AddDoubleLine("  no AH price", missing, 0.55, 0.55, 0.55, 0.9, 0.7, 0.4)
+		end
 	end
 
 	local vendorUnit = ns.GetVendorSellPrice(record.outputItemID)
 	tooltip:AddDoubleLine("Vendor sell", vendorUnit and ns.FormatMoneyFull(vendorUnit) or "—",
 		0.8, 0.8, 0.8, 1, 1, 1)
 
-	tooltip:AddDoubleLine("AH price", econ.saleUnit and ns.FormatMoneyFull(econ.saleUnit) or "no Auctionator price",
+	local saleUnit = ns.GetPrice(record.outputItemID)
+	tooltip:AddDoubleLine("AH price", saleUnit and ns.FormatMoneyFull(saleUnit) or "no Auctionator price",
 		0.8, 0.8, 0.8, 1, 1, 1)
 
-	if econ.net then
-		local text = ns.FormatMoneyFull(econ.net)
-		if econ.net > 0 then text = "+" .. text end
+	if saleUnit and costInfo.cost then
+		local outputQty = ns.GetOutputQuantity(record)
+		local sale = saleUnit * outputQty
+		local cut = (ns.db.settings.ahCut or 5) / 100
+		local profit = sale * (1 - cut) - costInfo.cost
+		local text = ns.FormatMoneyFull(profit)
+		if profit > 0 then text = "+" .. text end
 		local r, g, b = 1, 0.35, 0.35
-		if econ.net > 0 then r, g, b = 0.25, 1, 0.45 end
+		if profit > 0 then r, g, b = 0.25, 1, 0.45 end
 		tooltip:AddDoubleLine("AH profit", text, 0.8, 0.8, 0.8, r, g, b)
 	end
 
