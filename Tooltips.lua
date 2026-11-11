@@ -25,6 +25,60 @@ local function addItemLine(tooltip, itemID)
 	end
 end
 
+-- Recipe items in the Auction House teach a recipe. Show what the crafted
+-- item costs and what it sells for, so the recipe's value is visible without
+-- opening the profession window.
+function ns.AddRecipeItemTooltip(tooltip, itemID)
+	if not tooltip or not itemID or itemID <= 0 then return false end
+	if not ns.db or not ns.db.settings.tooltips then return false end
+	if tooltip.OpenMarginRecipeItemID == itemID then return true end
+
+	local recipeID = ns.GetRecipeIDForRecipeItem and ns.GetRecipeIDForRecipeItem(itemID)
+	if not recipeID then return false end
+
+	local record = ns.db.recipes and ns.db.recipes[recipeID]
+	if not record and ns.LearnRecipeItem then
+		ns.LearnRecipeItem(itemID, nil)
+		record = ns.db.recipes and ns.db.recipes[recipeID]
+	end
+	if not record or not record.outputItemID then return false end
+
+	local econ = ns.GetRecipeTooltipEconomics and ns.GetRecipeTooltipEconomics(recipeID)
+	if not econ then return false end
+
+	tooltip.OpenMarginRecipeItemID = itemID
+
+	local outputName = ns.GetItemName(record.outputItemID)
+	tooltip:AddLine(" ")
+	tooltip:AddLine("OpenMargin · " .. outputName, 1, 0.82, 0)
+
+	if econ.cost then
+		local label = "Craft cost"
+		if econ.outputQty and econ.outputQty > 1 then
+			label = string.format("Craft cost (x%d)", econ.outputQty)
+		end
+		tooltip:AddDoubleLine(label, econ.costComplete and ns.FormatMoneyFull(econ.cost) or "partial",
+			0.8, 0.8, 0.8, 1, 1, 1)
+	end
+
+	local vendorUnit = ns.GetVendorSellPrice(record.outputItemID)
+	tooltip:AddDoubleLine("Vendor sell", vendorUnit and ns.FormatMoneyFull(vendorUnit) or "—",
+		0.8, 0.8, 0.8, 1, 1, 1)
+
+	tooltip:AddDoubleLine("AH price", econ.saleUnit and ns.FormatMoneyFull(econ.saleUnit) or "no Auctionator price",
+		0.8, 0.8, 0.8, 1, 1, 1)
+
+	if econ.net then
+		local text = ns.FormatMoneyFull(econ.net)
+		if econ.net > 0 then text = "+" .. text end
+		local r, g, b = 1, 0.35, 0.35
+		if econ.net > 0 then r, g, b = 0.25, 1, 0.45 end
+		tooltip:AddDoubleLine("AH profit", text, 0.8, 0.8, 0.8, r, g, b)
+	end
+
+	return true
+end
+
 function ns.OnItemTooltip(tooltip, data)
 	if not tooltip then return end
 
@@ -37,6 +91,9 @@ function ns.OnItemTooltip(tooltip, data)
 	end
 
 	addItemLine(tooltip, itemID)
+	if ns.AddRecipeItemTooltip then
+		ns.AddRecipeItemTooltip(tooltip, itemID)
+	end
 end
 
 function ns.InstallTooltipHook()
@@ -64,6 +121,7 @@ function ns.InstallTooltipHook()
 		ns.tooltipHideHooked = true
 		pcall(_G.GameTooltip.HookScript, _G.GameTooltip, "OnHide", function(tooltip)
 			tooltip.OpenMarginItemID = nil
+			tooltip.OpenMarginRecipeItemID = nil
 		end)
 	end
 end

@@ -747,6 +747,36 @@ function ns.GetRecipeSpellForItem(itemID)
 	return spellID, professionInfo, schematic, spellName
 end
 
+function ns.GetRecipeIDForRecipeItem(itemID)
+	if not itemID or itemID <= 0 then return nil end
+	ns.recipeItemLookup = ns.recipeItemLookup or {}
+	local cached = ns.recipeItemLookup[itemID]
+	if cached ~= nil then return cached or nil end
+
+	local classID = ns.GetItemClassID(itemID)
+	if classID and classID ~= RECIPE_CLASS_ID then
+		ns.recipeItemLookup[itemID] = false
+		return nil
+	end
+	if not classID then return nil end
+
+	local recipeID = ns.GetRecipeSpellForItem(itemID)
+	ns.recipeItemLookup[itemID] = recipeID or false
+	return recipeID or nil
+end
+
+-- Account-wide economics for a recipe item tooltip. Cached per price epoch.
+function ns.GetRecipeTooltipEconomics(recipeID)
+	if not recipeID or not ns.db then return nil end
+	local epoch = ns.priceEpoch or 1
+	ns.recipeTooltipCache = ns.recipeTooltipCache or {}
+	local entry = ns.recipeTooltipCache[recipeID]
+	if entry and entry.epoch == epoch then return entry.econ end
+	local econ = ns.GetEconomics(recipeID, ns.BuildAccountContext(true))
+	ns.recipeTooltipCache[recipeID] = { epoch = epoch, econ = econ }
+	return econ
+end
+
 function ns.LearnRecipeItem(itemID, minPrice)
 	if not itemID or itemID <= 0 then return false end
 	local spellID, professionInfo, schematic, spellName = ns.GetRecipeSpellForItem(itemID)
@@ -783,6 +813,8 @@ function ns.LearnRecipeItem(itemID, minPrice)
 		record.recipeItemID = itemID
 		record.requiredSkillMissingAt = nil
 	end
+	ns.recipeItemLookup = ns.recipeItemLookup or {}
+	ns.recipeItemLookup[itemID] = spellID
 	return true
 end
 
@@ -956,6 +988,7 @@ function ns.InvalidatePathSurvey()
 	ns.paths.dirty = true
 	ns.paths.survey = nil
 	ns.paths.rows = nil
+	ns.recipeTooltipCache = nil
 end
 
 function ns.GetPathTabCounts()
