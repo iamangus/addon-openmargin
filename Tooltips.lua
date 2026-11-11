@@ -41,7 +41,25 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 		ns.LearnRecipeItem(itemID, nil)
 		record = ns.db.recipes and ns.db.recipes[recipeID]
 	end
-	if not record or not record.outputItemID then return false end
+	if not record and ns.GetRecipeNameFromItem and ns.FindTrainerRecipe then
+		local name = ns.GetRecipeNameFromItem(itemID)
+		local byName = name and ns.FindTrainerRecipe(nil, name)
+		if byName then record = ns.db.recipes and ns.db.recipes[byName] end
+	end
+	if ns.BuyLog and ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		ns.BuyLog("recipe tooltip item=%s recipe=%s record=%s output=%s",
+			tostring(itemID), tostring(recipeID), tostring(record ~= nil),
+			tostring(record and record.outputItemID))
+	end
+	if not record or not record.outputItemID then
+		if ns.GetRecipeNameFromItem and ns.GetRecipeNameFromItem(itemID)
+			and tooltip.OpenMarginRecipeHintID ~= itemID then
+			tooltip.OpenMarginRecipeHintID = itemID
+			tooltip:AddLine(" ")
+			tooltip:AddLine("OpenMargin: recipe not captured yet (open the profession once)", 0.55, 0.55, 0.55)
+		end
+		return false
+	end
 
 	local econ = ns.GetRecipeTooltipEconomics and ns.GetRecipeTooltipEconomics(recipeID)
 	if not econ then return false end
@@ -127,6 +145,7 @@ function ns.InstallTooltipHook()
 		pcall(_G.GameTooltip.HookScript, _G.GameTooltip, "OnHide", function(tooltip)
 			tooltip.OpenMarginItemID = nil
 			tooltip.OpenMarginRecipeItemID = nil
+			tooltip.OpenMarginRecipeHintID = nil
 		end)
 	end
 end

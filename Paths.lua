@@ -709,22 +709,54 @@ end
 -- Recipe item discovery
 -- ---------------------------------------------------------------------------
 
-function ns.GetRecipeSpellForItem(itemID)
-	if not itemID or itemID <= 0 then return nil end
-	if not _G.C_Item or type(_G.C_Item.GetItemSpell) ~= "function" then return nil end
+local RECIPE_ITEM_PREFIXES = {
+	"Recipe", "Pattern", "Plans", "Formula", "Schematic", "Design", "Technique",
+}
 
-	local ok, spellName, spellID = pcall(_G.C_Item.GetItemSpell, itemID)
-	spellID = tonumber(spellID)
-	if not ok or not spellID or spellID <= 0 then
-		-- Some builds expect an item link or ItemInfo rather than a bare ID.
-		local info = ns.GetItemInfo(itemID)
-		if info and info.link then
-			local linkOk, linkName, linkID = pcall(_G.C_Item.GetItemSpell, info.link)
-			if linkOk and tonumber(linkID) and tonumber(linkID) > 0 then
-				spellName, spellID = linkName, tonumber(linkID)
-			end
+function ns.GetRecipeNameFromItem(itemID)
+	local name = ns.GetItemName(itemID)
+	if type(name) ~= "string" then return nil end
+	for index = 1, #RECIPE_ITEM_PREFIXES do
+		local stripped = name:gsub("^" .. RECIPE_ITEM_PREFIXES[index] .. ":%s*", "", 1)
+		if stripped ~= name then
+			stripped = ns.Trim(stripped)
+			if stripped ~= "" then return stripped end
 		end
 	end
+	return nil
+end
+
+local function itemSpell(itemID)
+	local info = ns.GetItemInfo(itemID)
+	local link = info and info.link
+	local spellName, spellID
+
+	local function try(call, argument)
+		if type(call) ~= "function" then return false end
+		local ok, name, id = pcall(call, argument)
+		id = tonumber(id)
+		if ok and id and id > 0 then
+			spellName, spellID = name, id
+			return true
+		end
+		return false
+	end
+
+	if _G.C_Item and type(_G.C_Item.GetItemSpell) == "function" then
+		try(_G.C_Item.GetItemSpell, itemID)
+		if not spellID and link then try(_G.C_Item.GetItemSpell, link) end
+	end
+	if not spellID and type(_G.GetItemSpell) == "function" then
+		if link then try(_G.GetItemSpell, link) end
+		if not spellID then try(_G.GetItemSpell, itemID) end
+	end
+	return spellName, spellID
+end
+
+function ns.GetRecipeSpellForItem(itemID)
+	if not itemID or itemID <= 0 then return nil end
+
+	local spellName, spellID = itemSpell(itemID)
 	if not spellID or spellID <= 0 then return nil end
 
 	local professionInfo
@@ -773,6 +805,21 @@ function ns.GetRecipeIDForRecipeItem(itemID)
 	-- The class can be nil while a bag/vendor item is still loading. The spell
 	-- lookup is cheap, so try it rather than giving up on the tooltip.
 	local recipeID = ns.GetRecipeSpellForItem(itemID)
+	if ns.BuyLog and ns.IsBuyLogEnabled and ns.IsBuyLogEnabled() then
+		ns.BuyLog("recipe item lookup item=%s class=%s spell=%s name=%s",
+			tostring(itemID), tostring(classID), tostring(recipeID), tostring(ns.GetRecipeNameFromItem(itemID)))
+	end
+	if recipeID and not (ns.db and ns.db.recipes and ns.db.recipes[recipeID]) then
+		local name = ns.GetRecipeNameFromItem(itemID)
+		local byName = name and ns.FindTrainerRecipe and ns.FindTrainerRecipe(nil, name)
+		if byName then recipeID = byName end
+	end
+	if not recipeID then
+		local name = ns.GetRecipeNameFromItem(itemID)
+		if name and ns.FindTrainerRecipe then
+			recipeID = ns.FindTrainerRecipe(nil, name)
+		end
+	end
 	if not recipeID and not classID then return nil end
 	ns.recipeItemLookup[itemID] = recipeID or false
 	return recipeID or nil
