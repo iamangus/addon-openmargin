@@ -33,13 +33,29 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 	if not ns.db or not ns.db.settings.tooltips then return false end
 	if tooltip.OpenMarginRecipeItemID == itemID then return true end
 
+	local outputID, outputName, costInfo, missing
+
 	local record, recipeID = ns.ResolveItemRecipe and ns.ResolveItemRecipe(itemID)
-	if not record then
-		-- Older captures already hold the recipe; use them as a fallback.
-		recipeID = ns.GetRecipeIDForRecipeItem and ns.GetRecipeIDForRecipeItem(itemID)
-		record = recipeID and ns.db.recipes and ns.db.recipes[recipeID]
+	if record and record.outputItemID then
+		recipeID = recipeID or record.id
+		outputID = record.outputItemID
+		outputName = ns.GetItemName(outputID)
+		costInfo = ns.GetAHCraftCost and ns.GetAHCraftCost(recipeID, record)
 	end
-	if not record or not record.outputItemID then
+
+	if not costInfo then
+		-- Fallback: read the crafted item and reagent links from the item
+		-- tooltip itself. This does not need the profession or a schematic.
+		local parsed = ns.ParseRecipeItemTooltip and ns.ParseRecipeItemTooltip(itemID, tooltip)
+		if parsed then
+			outputID = parsed.outputID
+			outputName = parsed.outputName or ns.GetRecipeNameFromItem(itemID)
+			costInfo = { cost = parsed.cost, complete = parsed.complete }
+			missing = parsed.missing
+		end
+	end
+
+	if not costInfo then
 		if ns.GetRecipeNameFromItem and ns.GetRecipeNameFromItem(itemID)
 			and tooltip.OpenMarginRecipeHintID ~= itemID then
 			tooltip.OpenMarginRecipeHintID = itemID
@@ -49,15 +65,9 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 		return false
 	end
 
-	recipeID = recipeID or record.id
-	local costInfo = ns.GetAHCraftCost and ns.GetAHCraftCost(recipeID, record)
-	if not costInfo then return false end
-
 	tooltip.OpenMarginRecipeItemID = itemID
-
-	local outputName = ns.GetItemName(record.outputItemID)
 	tooltip:AddLine(" ")
-	tooltip:AddLine("OpenMargin · " .. outputName, 1, 0.82, 0)
+	tooltip:AddLine("OpenMargin · " .. (outputName or "crafted item"), 1, 0.82, 0)
 
 	local costText = "—"
 	if costInfo.cost then
@@ -66,29 +76,31 @@ function ns.AddRecipeItemTooltip(tooltip, itemID)
 	tooltip:AddDoubleLine("AH mats", costText, 0.8, 0.8, 0.8, 1, 1, 1)
 
 	if not costInfo.complete then
-		local missing
-		local details = costInfo.details or {}
-		for index = 1, #details do
-			if not details[index].unit then
-				missing = ns.GetItemName(details[index].itemID)
-				break
+		local missingName = missing and missing[1]
+		if not missingName then
+			local details = costInfo.details or {}
+			for index = 1, #details do
+				if not details[index].unit then
+					missingName = ns.GetItemName(details[index].itemID)
+					break
+				end
 			end
 		end
-		if missing then
-			tooltip:AddDoubleLine("  no AH price", missing, 0.55, 0.55, 0.55, 0.9, 0.7, 0.4)
+		if missingName then
+			tooltip:AddDoubleLine("  no AH price", tostring(missingName), 0.55, 0.55, 0.55, 0.9, 0.7, 0.4)
 		end
 	end
 
-	local vendorUnit = ns.GetVendorSellPrice(record.outputItemID)
+	local vendorUnit = outputID and ns.GetVendorSellPrice(outputID)
 	tooltip:AddDoubleLine("Vendor sell", vendorUnit and ns.FormatMoneyFull(vendorUnit) or "—",
 		0.8, 0.8, 0.8, 1, 1, 1)
 
-	local saleUnit = ns.GetPrice(record.outputItemID)
+	local saleUnit = outputID and ns.GetPrice(outputID)
 	tooltip:AddDoubleLine("AH price", saleUnit and ns.FormatMoneyFull(saleUnit) or "no Auctionator price",
 		0.8, 0.8, 0.8, 1, 1, 1)
 
 	if saleUnit and costInfo.cost then
-		local outputQty = ns.GetOutputQuantity(record)
+		local outputQty = record and ns.GetOutputQuantity(record) or 1
 		local sale = saleUnit * outputQty
 		local cut = (ns.db.settings.ahCut or 5) / 100
 		local profit = sale * (1 - cut) - costInfo.cost

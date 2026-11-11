@@ -713,6 +713,43 @@ local RECIPE_ITEM_PREFIXES = {
 	"Recipe", "Pattern", "Plans", "Formula", "Schematic", "Design", "Technique",
 }
 
+function ns.BuildItemNameMap()
+	if ns.itemNameMap then return ns.itemNameMap end
+	local map = {}
+	local function add(itemID)
+		itemID = tonumber(itemID)
+		if not itemID or itemID <= 0 then return end
+		local info = ns.GetItemInfo(itemID)
+		if info and info.name then
+			map[ns.Normalize(info.name)] = itemID
+		end
+	end
+
+	local recipes = ns.db and ns.db.recipes or {}
+	for _, record in pairs(recipes) do
+		if type(record) == "table" then
+			add(record.outputItemID)
+			local reagents = record.reagents or {}
+			for index = 1, #reagents do
+				local ids = reagents[index].itemIDs or {}
+				for idIndex = 1, #ids do add(ids[idIndex]) end
+			end
+		end
+	end
+	for _, item in pairs(ns.db and ns.db.recipeItems or {}) do
+		if type(item) == "table" then add(item.itemID) end
+	end
+
+	ns.itemNameMap = map
+	return map
+end
+
+function ns.GetItemIDByName(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	local map = ns.BuildItemNameMap()
+	return map[ns.Normalize(name)]
+end
+
 function ns.GetRecipeNameFromItem(itemID)
 	local name = ns.GetItemName(itemID)
 	if type(name) ~= "string" then return nil end
@@ -836,6 +873,199 @@ function ns.ResolveItemRecipe(itemID)
 
 	if ns.BuyLog then ns.BuyLog("resolve item=%s recipe=%s no schematic", tostring(itemID), tostring(spellID)) end
 	return nil
+end
+
+local TOOLTIP_ITEM_LINK = "|Hitem:(%d+):[^|]*|h%[(.-)%]|h"
+
+-- The recipe item tooltip lists the crafted item and its reagents as links.
+-- Reading those links is the fallback when the client refuses to return a
+-- recipe schematic outside a profession window.
+function ns.ParseRecipeItemTooltip(itemID, liveTooltip)
+	ns.GetItemInfo(itemID)
+	local lines = {}
+
+	-- The live tooltip keeps the reagent item links, so prefer it.
+	if liveTooltip and type(liveTooltip.GetRegions) == "function" then
+		local regions = { liveTooltip:GetRegions() }
+		for index = 1, #regions do
+			local region = regions[index]
+			if region and type(region.GetText) == "function" then
+				local textOk, text = pcall(region.GetText, region)
+				if textOk and type(text) == "string" and text ~= "" then
+					lines[#lines + 1] = text
+				end
+			end
+		end
+	end
+
+	local api = _G.C_TooltipInfo
+	if #lines == 0 and api and type(api.GetItemByID) == "function" then
+		local ok, data = pcall(api.GetItemByID, itemID)
+		if ok and type(data) == "table" and type(data.lines) == "table" then
+			for lineIndex = 1, #data.lines do
+				local line = data.lines[lineIndex]
+				if type(line) == "table" then
+					local text = table.concat({
+						type(line.leftText) == "string" and line.leftText or "",
+						type(line.rightText) == "string" and line.rightText or "",
+					}, " ")
+					lines[#lines + 1] = text
+				end
+			end
+		end
+	end
+
+	if #lines == 0 then return nil end
+
+	local outputName = ns.GetRecipeNameFromItem(itemID)
+	local outputID
+
+	local function scanLinks(text, skipOutput)
+		local found = {}
+		local position = 1
+		while true do
+			local startIndex, endIndex, itemLinkID, linkName = text:find(TOOLTIP_ITEM_LINK, position)
+			if not startIndex then break end
+			itemLinkID = tonumber(itemLinkID)
+			if itemLinkID and itemLinkID > 0 then
+				local after = text:sub(endIndex + 1)
+				local qty = tonumber(after:match("^%s*%((%d+)%)")) or 1
+				found[#found + 1] = { itemID = itemLinkID, name = linkName, qty = qty }
+			end
+			position = endIndex + 1
+		end
+		return found
+	end
+
+	if outputName then
+		local wanted = ns.Normalize(outputName)
+		for lineIndex = 1, #lines do
+			local links = scanLinks(lines[lineIndex])
+			for linkIndex = 1, #links do
+				if ns.Normalize(links[linkIndex].name) == wanted then
+					outputID = links[linkIndex].itemID
+					break
+				end
+			end
+			if outputID then break end
+		end
+		if not outputID then
+			outputID = ns.GetItemIDByName(outputName)
+		end
+	end
+
+	if not outputID then
+		-- The crafted item is normally the first link after the pattern itself.
+		for lineIndex = 1, #lines do
+			local links = scanLinks(lines[lineIndex])
+			for linkIndex = 1, #links do
+				if links[linkIndex].itemID ~= itemID then
+					outputID = links[linkIndex].itemID
+					break
+				end
+			end
+			if outputID then break end
+		end
+	end
+
+	local reagents = {}
+
+	-- Prefer the line after the last mention of the crafted item: that is the
+	-- "Use: Teaches you how to craft ..." block, and the next line lists the
+	-- reagents. This keeps the disenchant material links out.
+	if outputName then
+		local wanted = ns.Normalize(outputName)
+		local useIndex
+		for lineIndex = 1, #lines do
+			if ns.Normalize(lines[lineIndex]):find(wanted, 1, true) then
+				useIndex = lineIndex
+			end
+		end
+		if useIndex then
+			for lineIndex = useIndex, math.min(#lines, useIndex + 2) do
+				local links = scanLinks(lines[lineIndex])
+				for linkIndex = 1, #links do
+					local link = links[linkIndex]
+					if link.itemID ~= itemID and link.itemID ~= outputID then
+						reagents[#reagents + 1] = link
+					end
+				end
+			end
+		end
+	end
+
+	-- Fallback: the reagent line is the one with the most item links before
+	-- the "Requires ..." line.
+	local bestLinks, bestLine
+	if #reagents == 0 then
+		local stopIndex = #lines
+		for lineIndex = 1, #lines do
+			local lower = lines[lineIndex]:lower()
+			if lower:find("requires", 1, true) or lower:find("already known", 1, true) then
+				stopIndex = lineIndex - 1
+				break
+			end
+		end
+		for lineIndex = 1, math.max(1, stopIndex) do
+			local links = scanLinks(lines[lineIndex])
+			local valid = {}
+			for linkIndex = 1, #links do
+				local link = links[linkIndex]
+				if link.itemID ~= itemID and link.itemID ~= outputID then
+					valid[#valid + 1] = link
+				end
+			end
+			if #valid > #(bestLinks or {}) then
+				bestLinks, bestLine = valid, lineIndex
+			end
+		end
+	end
+
+	if #reagents == 0 and bestLinks and #bestLinks >= 2 then
+		reagents = bestLinks
+	elseif #reagents == 0 and bestLinks and #bestLinks == 1 and lines[bestLine]:find("%(%d+%)") then
+		reagents = bestLinks
+	elseif #reagents == 0 then
+		-- No links: take the line with the most "Name (qty)" pairs that map
+		-- back to known items.
+		local bestPlain
+		for lineIndex = 1, #lines do
+			local found = {}
+			for name, qty in lines[lineIndex]:gmatch("([%a][%w%s'%-]-)%s*%((%d+)%)") do
+				local nameID = ns.GetItemIDByName(name)
+				if nameID and nameID ~= itemID and nameID ~= outputID then
+					found[#found + 1] = { itemID = nameID, name = name, qty = tonumber(qty) or 1 }
+				end
+			end
+			if #found > #(bestPlain or {}) then
+				bestPlain = found
+			end
+		end
+		reagents = bestPlain or {}
+	end
+
+	if #reagents == 0 then return nil end
+
+	local total, complete, missing = 0, true, {}
+	for index = 1, #reagents do
+		local reagent = reagents[index]
+		local price = ns.GetPrice(reagent.itemID)
+		if price and price > 0 then
+			total = total + price * (reagent.qty or 1)
+		else
+			complete = false
+			missing[#missing + 1] = reagent.name or ns.GetItemName(reagent.itemID)
+		end
+	end
+
+	return {
+		outputID = outputID,
+		outputName = outputName,
+		reagents = reagents,
+		cost = total,
+		complete = complete,
+		missing = missing,
+	}
 end
 
 -- Cost with every reagent bought on the Auction House: no vendor fallback and
@@ -1133,6 +1363,7 @@ end
 -- ---------------------------------------------------------------------------
 
 function ns.MarkPathSurveyDirty()
+	ns.itemNameMap = nil
 	ns.paths = ns.paths or {}
 	ns.paths.dirty = true
 end

@@ -49,6 +49,8 @@ query the Auction House themselves when you click Scan.
   **cost of buying every reagent on the Auction House**, plus the crafted
   item's **vendor sell** and **Auctionator price** (and AH profit) on hover.
   This works from the item itself and does not require opening the profession.
+  If the client refuses to expose the recipe schematic, the reagent links in
+  the item tooltip are used instead.
 - **Buy Orders tab in the Auction House.** Set a commodity, a maximum unit
   price, a budget and a quantity per purchase, then click **Buy**. It starts a
   blind commodity purchase, checks the live quote against your limits, and
