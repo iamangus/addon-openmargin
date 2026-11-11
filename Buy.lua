@@ -1520,8 +1520,12 @@ function ns.CommitBuyRow(row)
 
 	if row.itemBox then
 		local text = ns.Trim(row.itemBox:GetText())
-		log("commit item raw=%q ruleName=%q ruleID=%s focus=%s", tostring(text), tostring(rule.itemName), tostring(rule.itemID), tostring(row.itemBox:HasFocus()))
-		if text ~= (rule.itemName or "") then
+		if text == (rule.itemName or "") then rule.itemTyped = nil end
+		log("commit item raw=%q ruleName=%q ruleID=%s typed=%s focus=%s", tostring(text), tostring(rule.itemName), tostring(rule.itemID), tostring(rule.itemTyped), tostring(row.itemBox:HasFocus()))
+		-- Only a name the player actually typed is looked up. Once it resolves
+		-- to an item the field shows the real name, and Buy presses never
+		-- search again.
+		if rule.itemTyped and text ~= "" then
 			local itemID = ns.ResolveBuyItemID(text)
 			if itemID then
 				applyPurchasableItem(row, itemID)
@@ -1530,10 +1534,12 @@ function ns.CommitBuyRow(row)
 				local candidates = ns.FindBuyItemCandidates(text)
 				if #candidates == 1 then
 					applyPurchasableItem(row, candidates[1].itemID)
+					rule.itemTyped = nil
 					if not row.itemBox:HasFocus() then row.itemBox:SetText(rule.itemName) end
 				elseif #candidates > 1 then
 					rule.itemID = nil
 					rule.itemName = text ~= "" and text or nil
+					rule.itemTyped = nil
 					state.phase = "idle"
 					state.plan = nil
 					state.status = "Several items match - shift-click one"
@@ -1542,6 +1548,7 @@ function ns.CommitBuyRow(row)
 					-- Auction House search comes back.
 					rule.itemID = nil
 					rule.itemName = text
+					rule.itemTyped = nil
 					state.phase = "idle"
 					state.plan = nil
 					if not ns.StartBuyItemLookup(row, text) and not state.status then
@@ -1550,6 +1557,7 @@ function ns.CommitBuyRow(row)
 				else
 					rule.itemID = nil
 					rule.itemName = nil
+					rule.itemTyped = nil
 					state.phase = "idle"
 					state.plan = nil
 					state.status = "Set an item"
@@ -1919,6 +1927,12 @@ local function createRow(parent)
 	row.itemBox:SetHyperlinksEnabled(true)
 	row.itemBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 	row.itemBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	-- Typing a name marks the field for a lookup. Any later change (including
+	-- the resolved name being written back) clears the mark, so the search
+	-- runs once per typed name.
+	row.itemBox:HookScript("OnTextChanged", function(self, userInput)
+		if userInput and row.rule then row.rule.itemTyped = true end
+	end)
 
 	row.maxBox = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
 	row.maxBox:SetSize(66, 20)
