@@ -121,8 +121,10 @@ Set **Buy key** (for example `F8`) to bind a keyboard key to the checked Buy
 rows while the Buy Orders tab is open. Check **Key** on one or more rows; the
 key cycles through them in list order. After a successful purchase the same
 order keeps the key for 4 more attempts, so a restock is chased before moving
-on. The line under the key field shows the order the key will use next, plus
-how many attempts remain. Use a key you do not type into the fields; the
+on; another success resets that count to 4. When the attempts run out (each
+miss, rejected quote or failed purchase uses one) the key goes back to cycling
+through every checked order. The line under the key field shows the order the
+key will use next, plus how many attempts remain. Use a key you do not type into the fields; the
 binding is cleared when the tab closes.
 
 **Remaining** also shows the lowest unit quote that order has received

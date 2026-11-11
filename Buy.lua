@@ -988,6 +988,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 	end
 
 	if not withinLimits then
+		if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(rule, false) end
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		ns.HideBuyDialog()
 		ns.DisableNativeBuy()
@@ -1023,6 +1024,7 @@ function ns.HandleCommodityPrice(unitPrice, totalPrice)
 		log("confirm sent ok=%s err=%s", tostring(confirmed), tostring(confirmError))
 	end
 	if not confirmed then
+		if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(rule, false) end
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
 		ns.HideBuyDialog()
 		ns.buyPending = nil
@@ -1036,7 +1038,7 @@ end
 function ns.HandleCommodityUnavailable()
 	local pending = ns.buyPending
 	if not pending or pending.phase ~= "quote" then return end
-	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule) end
+	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule, false) end
 	log("commodity price unavailable itemID=%s", tostring(pending.rule.itemID))
 	if _G.C_AuctionHouse and type(_G.C_AuctionHouse.CancelCommoditiesPurchase) == "function" then
 		pcall(_G.C_AuctionHouse.CancelCommoditiesPurchase)
@@ -1090,12 +1092,9 @@ end
 function ns.HandlePurchaseFailed()
 	local pending = ns.buyPending
 	if not pending then return end
-	-- A failed buy is an attempt on this order; use up one sticky slot so the
-	-- key moves on after a few misses.
-	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule) end
-	if ns.buyKeySticky and ns.buyKeySticky.rule == pending.rule then
-		ns.buyKeySticky.remaining = 0
-	end
+	-- A failed buy spends one sticky attempt; the key returns to cycling when
+	-- the counter runs out.
+	if ns.ConsumeBuyKeySticky then ns.ConsumeBuyKeySticky(pending.rule, false) end
 	local rule = pending.rule
 	log("purchase failed itemID=%s", tostring(rule.itemID))
 	local state = ns.GetBuyState(rule)
@@ -1467,8 +1466,12 @@ function ns.DeleteBuyRule(rule)
 	for index = #orders, 1, -1 do
 		if orders[index] == rule then table.remove(orders, index) end
 	end
+	if ns.buyKeyAttempts then ns.buyKeyAttempts[rule] = nil end
 	if wasKey and #orders > 0 then
 		orders[1].keyTarget = true
+	end
+	if ns.buyKeyCycleIndex and #ns.GetKeyTargetRules() > 0 then
+		ns.buyKeyCycleIndex = (ns.buyKeyCycleIndex - 1) % #ns.GetKeyTargetRules() + 1
 	end
 	ns.RefreshBuyFrame()
 	ns.UpdateBuyKeyButton()
@@ -1724,10 +1727,21 @@ function ns.GetKeyTargetRules()
 	return rules
 end
 
+function ns.ResetBuyKeyCycle()
+	ns.buyKeyAttempts = {}
+	ns.buyKeyCycleIndex = ns.buyKeyCycleIndex or 0
+	for _, rule in pairs(ns.db and ns.db.buyOrders or {}) do
+		if type(rule) == "table" then rule.keyStickyLeft = nil end
+	end
+end
+
 function ns.SetBuyKeyRule(rule, selected)
 	if not ns.db then return end
 	if selected == nil then selected = true end
 	if rule then rule.keyTarget = selected == true end
+	ns.buyKeyAttempts = ns.buyKeyAttempts or {}
+	if rule then ns.buyKeyAttempts[rule] = nil end
+	if rule then rule.keyStickyLeft = nil end
 	ns.RefreshBuyFrame()
 	ns.UpdateBuyKeyButton()
 end
@@ -1742,16 +1756,23 @@ function ns.GetBuyKeyRow()
 	local targets = ns.GetKeyTargetRules()
 	if #targets == 0 then return nil end
 
-	local sticky = ns.buyKeySticky
-	if sticky and sticky.rule and sticky.remaining > 0 and isBuyRuleReady(sticky.rule) then
+	-- An order that recently succeeded keeps priority until its attempts run out.
+	local stickyRule, stickyLeft
+	for index = 1, #targets do
+		local rule = targets[index]
+		local left = ns.GetBuyKeyStickyLeft(rule)
+		if left > 0 and (not stickyLeft or left > stickyLeft) and isBuyRuleReady(rule) then
+			stickyRule, stickyLeft = rule, left
+		end
+	end
+	if stickyRule then
 		for index = 1, #targets do
-			if targets[index] == sticky.rule then
+			if targets[index] == stickyRule then
 				ns.buyKeyCycleIndex = index
 				break
 			end
 		end
-		local state = ns.GetBuyState(sticky.rule)
-		return state.row
+		return ns.GetBuyState(stickyRule).row
 	end
 
 	local startIndex = (ns.buyKeyCycleIndex or 0) % #targets + 1
@@ -1767,8 +1788,25 @@ function ns.GetBuyKeyRow()
 	return nil
 end
 
--- After a successful purchase the same order keeps the key for the next few
--- attempts, so a restock is chased before the key moves on.
+-- The key sticks to the order that just succeeded for the next few attempts,
+-- then returns to cycling through every checked order. The counter is reset
+-- on each success, so a good order keeps priority as long as it keeps filling.
+ns.buyKeyAttempts = ns.buyKeyAttempts or {}
+ns.buyKeyCycleIndex = ns.buyKeyCycleIndex or 0
+
+local function startCycleAfter(rule)
+	local targets = ns.GetKeyTargetRules()
+	if #targets == 0 then return end
+	local index
+	for lookup = 1, #targets do
+		if targets[lookup] == rule then
+			index = lookup
+			break
+		end
+	end
+	ns.buyKeyCycleIndex = index and (index % #targets + 1) or 1
+end
+
 function ns.AdvanceBuyKeyCycle(successfulRule)
 	local targets = ns.GetKeyTargetRules()
 	if #targets == 0 then return end
@@ -1782,28 +1820,35 @@ function ns.AdvanceBuyKeyCycle(successfulRule)
 	end
 	if not index then return end
 
+	ns.buyKeyAttempts = ns.buyKeyAttempts or {}
+	ns.buyKeyAttempts[successfulRule] = KEY_STICKY_ATTEMPTS
 	successfulRule.keyStickyLeft = KEY_STICKY_ATTEMPTS
-	ns.buyKeySticky = {
-		rule = successfulRule,
-		remaining = KEY_STICKY_ATTEMPTS,
-		position = index,
-	}
 	ns.buyKeyCycleIndex = index
 end
 
-function ns.ConsumeBuyKeySticky(rule)
-	local sticky = ns.buyKeySticky
-	if not sticky or sticky.rule ~= rule then return end
-	sticky.remaining = sticky.remaining - 1
-	if rule.keyStickyLeft then rule.keyStickyLeft = rule.keyStickyLeft - 1 end
-	if sticky.remaining > 0 then return end
+function ns.GetBuyKeyStickyLeft(rule)
+	local attempts = ns.buyKeyAttempts and ns.buyKeyAttempts[rule]
+	return tonumber(attempts) or 0
+end
 
-	-- Stickiness is spent: move the key to the next checked order.
-	ns.buyKeySticky = nil
-	local targets = ns.GetKeyTargetRules()
-	if #targets == 0 then return end
-	local position = sticky.position or ns.buyKeyCycleIndex or 1
-	ns.buyKeyCycleIndex = position % #targets + 1
+-- A press was spent on this order. Success resets the counter; a failed or
+-- rejected attempt uses one up, and when it reaches zero the key returns to
+-- cycling through the checked orders.
+function ns.ConsumeBuyKeySticky(rule, succeeded)
+	if not rule then return end
+	if succeeded then return end
+
+	local left = ns.GetBuyKeyStickyLeft(rule)
+	if left <= 0 then return end
+
+	left = left - 1
+	ns.buyKeyAttempts[rule] = left
+	rule.keyStickyLeft = left
+	if left > 0 then return end
+
+	ns.buyKeyAttempts[rule] = nil
+	rule.keyStickyLeft = nil
+	startCycleAfter(rule)
 end
 
 function ns.GetBuyKeyLabel()
@@ -1811,12 +1856,13 @@ function ns.GetBuyKeyLabel()
 	if #targets == 0 then return "no key target" end
 	local row = ns.buyKeyRow
 	local name = row and row.rule and (ns.GetBuyItemDisplay(row.rule.itemID) or row.rule.itemName)
-	if targets and #targets > 1 then
-		local sticky = ns.buyKeySticky
-		if sticky and sticky.remaining > 0 then
-			return string.format("%s (+%d)", tostring(name or "?"), sticky.remaining)
+	if #targets > 1 then
+		local left = row and row.rule and ns.GetBuyKeyStickyLeft(row.rule) or 0
+		if left > 0 then
+			return string.format("%s (+%d)", tostring(name or "?"), left)
 		end
-		return string.format("%s (1/%d)", tostring(name or "?"), #targets)
+		local position = ns.buyKeyCycleIndex or 1
+		return string.format("%s (%d/%d)", tostring(name or "?"), position, #targets)
 	end
 	return tostring(name or "?")
 end
@@ -1857,9 +1903,9 @@ function ns.UpdateBuyKeyStatus()
 	end
 	local row = ns.buyKeyRow
 	local name = row and row.rule and (ns.GetBuyItemDisplay(row.rule.itemID) or row.rule.itemName) or "nothing ready"
-	local sticky = ns.buyKeySticky
-	if sticky and sticky.remaining > 0 then
-		label:SetText(string.format("Key: %s x%d", tostring(name), sticky.remaining + 1))
+	local left = row and row.rule and ns.GetBuyKeyStickyLeft(row.rule) or 0
+	if left > 0 then
+		label:SetText(string.format("Key: %s, %d attempts left", tostring(name), left))
 		return
 	end
 	local position
